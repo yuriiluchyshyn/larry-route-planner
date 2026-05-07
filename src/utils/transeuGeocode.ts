@@ -59,7 +59,7 @@ export async function searchTranseuLocations(
     limit: limit.toString()
   });
 
-  const url = `https://api-platform.trans.eu/app/geocoder-api/api/v2/locations?${params.toString()}`;
+  const url = `/api/geocoder/app/geocoder-api/api/v2/locations?${params.toString()}`;
 
   try {
     const response = await fetch(url, {
@@ -87,26 +87,64 @@ export async function searchTranseuLocations(
 
 /**
  * Geocode a city name to get coordinates using Trans.eu API
+ * Use postal code if provided to get exact coordinates matching website behavior
  */
 export async function geocodeCity(
   cityName: string,
   countryCode: string,
-  bearerToken: string
+  bearerToken: string,
+  postalCode?: string
 ): Promise<{ latitude: number; longitude: number; postalCode?: string } | null> {
-  // Try searching for city in specific country
-  const query = `${cityName}`;
+  // Build search query - include postal code if provided (matches website behavior)
+  const query = postalCode ? `${postalCode} ${cityName}` : cityName;
+  console.log(`🌍 Larry: Geocoder query: "${query}"`);
+  
   const locations = await searchTranseuLocations(query, bearerToken, {
-    types: ['locality', 'locality_postal_area', 'combined_postal_area'],
-    limit: 10
+    types: ['locality_postal_area', 'locality', 'combined_postal_area', 'postal_area'],
+    limit: 20
   });
 
-  // Find best match - prefer exact locality match in the right country
+  console.log(`🌍 Larry: Geocoder returned ${locations.length} locations`);
+
+  // Priority 1: Exact locality + postal code match (most precise)
+  if (postalCode) {
+    const postalMatch = locations.find(loc => 
+      loc.locality?.toLowerCase() === cityName.toLowerCase() && 
+      loc.country === countryCode &&
+      loc.postalCode === postalCode
+    );
+    if (postalMatch) {
+      console.log(`🌍 Larry: Found exact postal+locality match: ${postalMatch.type}`);
+      return {
+        latitude: postalMatch.latitude,
+        longitude: postalMatch.longitude,
+        postalCode: postalMatch.postalCode || undefined
+      };
+    }
+  }
+
+  // Priority 2: locality_postal_area with matching city in correct country
+  const localityPostalMatch = locations.find(loc => 
+    loc.type === 'locality_postal_area' &&
+    loc.locality?.toLowerCase() === cityName.toLowerCase() && 
+    loc.country === countryCode
+  );
+  if (localityPostalMatch) {
+    console.log(`🌍 Larry: Found locality_postal_area match`);
+    return {
+      latitude: localityPostalMatch.latitude,
+      longitude: localityPostalMatch.longitude,
+      postalCode: localityPostalMatch.postalCode || undefined
+    };
+  }
+
+  // Priority 3: Exact locality match in correct country
   const exactMatch = locations.find(loc => 
     loc.locality?.toLowerCase() === cityName.toLowerCase() && 
     loc.country === countryCode
   );
-
   if (exactMatch) {
+    console.log(`🌍 Larry: Found exact locality match: ${exactMatch.type}`);
     return {
       latitude: exactMatch.latitude,
       longitude: exactMatch.longitude,
@@ -114,14 +152,14 @@ export async function geocodeCity(
     };
   }
 
-  // Fallback to partial match in same country
+  // Priority 4: Partial match in same country
   const countryMatch = locations.find(loc => 
     loc.country === countryCode && 
     (loc.locality?.toLowerCase().includes(cityName.toLowerCase()) ||
      cityName.toLowerCase().includes(loc.locality?.toLowerCase() || ''))
   );
-  
   if (countryMatch) {
+    console.log(`🌍 Larry: Found partial country match: ${countryMatch.type}`);
     return {
       latitude: countryMatch.latitude,
       longitude: countryMatch.longitude,
@@ -129,19 +167,7 @@ export async function geocodeCity(
     };
   }
 
-  // Last resort: any match with the city name
-  const anyMatch = locations.find(loc => 
-    loc.locality?.toLowerCase() === cityName.toLowerCase()
-  );
-  
-  if (anyMatch) {
-    return {
-      latitude: anyMatch.latitude,
-      longitude: anyMatch.longitude,
-      postalCode: anyMatch.postalCode || undefined
-    };
-  }
-
+  console.log(`🌍 Larry: No match found for ${cityName} in ${countryCode}`);
   return null;
 }
 

@@ -13,7 +13,13 @@ export default defineConfig({
         target: 'http://localhost:8847',
         changeOrigin: true,
         secure: false,
-        ws: false, // Disable WebSocket proxying to avoid conflicts
+        ws: false,
+      },
+      '/api/geocoder': {
+        target: 'http://localhost:8847',
+        changeOrigin: true,
+        secure: false,
+        ws: false,
       },
     },
   },

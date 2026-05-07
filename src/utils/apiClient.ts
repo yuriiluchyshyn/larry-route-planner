@@ -1,44 +1,26 @@
 import type { ApiResponse, FreightOffer, RouteConfig, WayPoint } from '../types';
 import countryCodesData from '../data/countryCodes.json';
-import geocodeCache from '../data/geocodeCache.json';
 import { geocodeCity } from './transeuGeocode';
 
 /**
- * Ensure waypoint has coordinates, geocoding if necessary
+ * Ensure waypoint has coordinates - ALWAYS fetch from Trans.eu geocoder API
+ * to get accurate coordinates matching what the website uses
  */
 async function ensureCoordinates(waypoint: WayPoint, bearerToken: string): Promise<WayPoint> {
-  // If coordinates are already present and non-zero, return as-is
-  if (waypoint.latitude !== 0 && waypoint.longitude !== 0) {
-    return waypoint;
-  }
-
-  // If no city name, can't geocode
+  // If no city name, can't geocode (country-level search)
   if (!waypoint.locality || isCountryName(waypoint.locality)) {
     return waypoint;
   }
 
-  // Check cache first
+  // ALWAYS fetch from API to get accurate coordinates
   const countryCode = extractCountryCode(waypoint.country);
-  const cacheKey = `${waypoint.locality}_${countryCode}`;
-  const cached = (geocodeCache.cache as Record<string, any>)[cacheKey];
-  
-  if (cached) {
-    console.log(`🌍 Larry: ✅ Using cached coordinates for ${waypoint.locality}: ${cached.latitude}, ${cached.longitude}`);
-    return {
-      ...waypoint,
-      latitude: cached.latitude,
-      longitude: cached.longitude,
-      postalCode: cached.postalCode || waypoint.postalCode
-    };
-  }
-
-  console.log(`🌍 Larry: Geocoding ${waypoint.locality} in ${waypoint.country}...`);
+  console.log(`🌍 Larry: Fetching coordinates from Trans.eu API for ${waypoint.locality} in ${waypoint.country}...`);
   
   try {
-    const result = await geocodeCity(waypoint.locality, countryCode, bearerToken);
+    const result = await geocodeCity(waypoint.locality, countryCode, bearerToken, waypoint.postalCode);
     
     if (result) {
-      console.log(`🌍 Larry: ✅ Found coordinates for ${waypoint.locality}: ${result.latitude}, ${result.longitude}`);
+      console.log(`🌍 Larry: ✅ Got coordinates from API for ${waypoint.locality}: ${result.latitude}, ${result.longitude}`);
       return {
         ...waypoint,
         latitude: result.latitude,
@@ -46,7 +28,7 @@ async function ensureCoordinates(waypoint: WayPoint, bearerToken: string): Promi
         postalCode: result.postalCode || waypoint.postalCode
       };
     } else {
-      console.warn(`🌍 Larry: ❌ Could not geocode ${waypoint.locality}`);
+      console.warn(`🌍 Larry: ❌ Could not geocode ${waypoint.locality} via API, using existing coords`);
       return waypoint;
     }
   } catch (error) {
@@ -222,13 +204,33 @@ export async function fetchFreightOffers(
     throw new Error('Bearer token contains invalid characters. Please ensure your token contains only standard ASCII characters.');
   }
 
+  // Deduplicate waypoints by country+locality+postalCode
+  const dedupeWaypoints = (points: WayPoint[]) => {
+    const seen = new Set<string>();
+    return points.filter(p => {
+      const key = `${p.country || ''}|${p.locality || ''}|${p.postalCode || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const dedupedLoadingPoints = dedupeWaypoints(config.loadingPoints);
+  const dedupedUnloadingPoints = dedupeWaypoints(config.unloadingPoints);
+  
+  if (dedupedLoadingPoints.length !== config.loadingPoints.length) {
+    console.log(`🧹 Larry: Deduplicated loading points: ${config.loadingPoints.length} → ${dedupedLoadingPoints.length}`);
+  }
+  if (dedupedUnloadingPoints.length !== config.unloadingPoints.length) {
+    console.log(`🧹 Larry: Deduplicated unloading points: ${config.unloadingPoints.length} → ${dedupedUnloadingPoints.length}`);
+  }
+
   // Geocode waypoints to ensure coordinates are available
   console.log(`🌍 Larry: Ensuring coordinates for all waypoints...`);
   const geocodedLoadingPoints = await Promise.all(
-    config.loadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
+    dedupedLoadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
   );
   const geocodedUnloadingPoints = await Promise.all(
-    config.unloadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
+    dedupedUnloadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
   );
 
   const allOffers: FreightOffer[] = [];
@@ -316,6 +318,7 @@ async function fetchPairMulti(
     console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${routeLabel} (have ${allOffers.length} offers so far${searchAfterValue ? ', cursor: ' + searchAfterValue : ''})`);
     if (searchAfterValue) {
       console.log(`🚛 Larry: Pagination URL: ${url}`);
+      console.log(`🚛 Larry: Using cursor type: index, value: ${searchAfterValue}`);
     }
 
     const response = await fetch(url, {
@@ -442,16 +445,20 @@ async function fetchPairMulti(
     pageCount++;
 
     // Get the cursor for the next page
-    // Trans.eu uses the offer ID for search_after pagination
+    // IMPORTANT: sort is by "index" field, so search_after value must be from index field
+    // (even though JSON key is "id" in the pagination param - that's how Trans.eu API expects it)
     const lastOffer = offers[offers.length - 1];
     
     // Log what we have for pagination on every page
     console.log(`🚛 Larry: Last offer on page ${pageCount}: id="${lastOffer.id}", index="${lastOffer.index}"`);
     
-    if (lastOffer && lastOffer.id) {
+    if (lastOffer && lastOffer.index) {
+      searchAfterValue = lastOffer.index;
+    } else if (lastOffer && lastOffer.id) {
+      // Fallback to id if no index
       searchAfterValue = lastOffer.id;
     } else {
-      console.log(`🚛 Larry: Cannot determine next page cursor (no id field), stopping`);
+      console.log(`🚛 Larry: Cannot determine next page cursor, stopping`);
       hasMore = false;
       break;
     }

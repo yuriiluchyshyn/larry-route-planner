@@ -180,57 +180,49 @@ function App() {
       }
       
       if (event.data.type === 'FILTERS_RESPONSE' && event.data.filters) {
-        console.log('Larry: Received filters from extension');
+        console.log('Larry: Received filters from extension:', event.data.filters);
         const filters = event.data.filters;
         const newConfig = { ...config };
         
-        // Update loading points - preserve existing coordinates if extension doesn't provide them
-        if (filters.loadingPoints && filters.loadingPoints.length > 0) {
-          newConfig.loadingPoints = filters.loadingPoints.map((point: any, index: number) => {
-            // Try to find matching existing point to preserve coordinates
-            const existing = config.loadingPoints[index];
-            
-            // Only use extension coordinates if they're non-zero
-            const hasValidCoords = point.latitude && point.longitude && 
-                                 point.latitude !== 0 && point.longitude !== 0;
-            
-            const lat = hasValidCoords ? point.latitude : (existing?.latitude || 0);
-            const lon = hasValidCoords ? point.longitude : (existing?.longitude || 0);
-            
-            return {
-              id: point.id || existing?.id || `lp${index + 1}`,
-              locality: point.locality || '',
-              postalCode: point.postalCode || '',
-              country: point.country || '47_poland',
-              latitude: lat,
-              longitude: lon,
-              range: point.range || existing?.range || 50
-            };
+        // Helper to deduplicate points by country+locality+postalCode key
+        const dedupe = (points: any[]) => {
+          const seen = new Set<string>();
+          return points.filter(p => {
+            const key = `${p.country || ''}|${p.locality || ''}|${p.postalCode || ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
           });
+        };
+        
+        // Update loading points - ALWAYS set coords to 0 so geocoder fetches fresh from API
+        if (filters.loadingPoints && filters.loadingPoints.length > 0) {
+          const dedupedLoading = dedupe(filters.loadingPoints);
+          console.log(`Larry: Loading points: ${filters.loadingPoints.length} from extension, ${dedupedLoading.length} after dedupe`);
+          newConfig.loadingPoints = dedupedLoading.map((point: any, index: number) => ({
+            id: point.id || `lp${index + 1}`,
+            locality: point.locality || '',
+            postalCode: point.postalCode || '',
+            country: point.country || '47_poland',
+            latitude: 0, // Always 0 - geocoder will fill these
+            longitude: 0,
+            range: point.range || 50
+          }));
         }
         
-        // Update unloading points - preserve existing coordinates if extension doesn't provide them
+        // Update unloading points - ALWAYS set coords to 0 so geocoder fetches fresh from API
         if (filters.unloadingPoints && filters.unloadingPoints.length > 0) {
-          newConfig.unloadingPoints = filters.unloadingPoints.map((point: any, index: number) => {
-            const existing = config.unloadingPoints[index];
-            
-            // Only use extension coordinates if they're non-zero
-            const hasValidCoords = point.latitude && point.longitude && 
-                                 point.latitude !== 0 && point.longitude !== 0;
-            
-            const lat = hasValidCoords ? point.latitude : (existing?.latitude || 0);
-            const lon = hasValidCoords ? point.longitude : (existing?.longitude || 0);
-            
-            return {
-              id: point.id || existing?.id || `up${index + 1}`,
-              locality: point.locality || '',
-              postalCode: point.postalCode || '',
-              country: point.country || '21_germany',
-              latitude: lat,
-              longitude: lon,
-              range: point.range || existing?.range || 50
-            };
-          });
+          const dedupedUnloading = dedupe(filters.unloadingPoints);
+          console.log(`Larry: Unloading points: ${filters.unloadingPoints.length} from extension, ${dedupedUnloading.length} after dedupe`);
+          newConfig.unloadingPoints = dedupedUnloading.map((point: any, index: number) => ({
+            id: point.id || `up${index + 1}`,
+            locality: point.locality || '',
+            postalCode: point.postalCode || '',
+            country: point.country || '21_germany',
+            latitude: 0, // Always 0 - geocoder will fill these
+            longitude: 0,
+            range: point.range || 50
+          }));
         }
         
         // Update weight
