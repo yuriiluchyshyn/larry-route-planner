@@ -198,31 +198,23 @@ async function fetchPair(
       console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
     }
 
-    // Log full response structure on first page to debug pagination
-    if (pageCount === 0) {
-      console.log('🚛 Larry: Full API response keys:', Object.keys(data));
-      if (data._links) console.log('🚛 Larry: _links:', JSON.stringify(data._links));
-      if (data.page) console.log('🚛 Larry: page:', JSON.stringify(data.page));
-      if (data.pagination) console.log('🚛 Larry: pagination:', JSON.stringify(data.pagination));
-      if (data.search_after) console.log('🚛 Larry: search_after:', JSON.stringify(data.search_after));
-      // Log last offer structure to find the correct cursor field
-      if (offers.length > 0) {
-        const last = offers[offers.length - 1];
-        console.log('🚛 Larry: Last offer keys:', Object.keys(last));
-        console.log('🚛 Larry: Last offer id:', last.id);
-        if ((last as any)._id) console.log('🚛 Larry: Last offer _id:', (last as any)._id);
-        if ((last as any).sort) console.log('🚛 Larry: Last offer sort:', (last as any).sort);
-        if ((last as any).index) console.log('🚛 Larry: Last offer index:', (last as any).index);
-      }
-    }
-
     console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
     
     if (offers.length === 0) {
-      // No more offers
+      // If we haven't reached expected total, try one more time with same cursor
+      // (API might have a temporary gap)
+      if (expectedTotal > 0 && allOffers.length < expectedTotal && emptyPageRetries < 2) {
+        emptyPageRetries++;
+        console.log(`🚛 Larry: Empty page but expected ${expectedTotal}, retry ${emptyPageRetries}/2`);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
       hasMore = false;
       break;
     }
+    
+    // Reset empty page retries on successful page
+    emptyPageRetries = 0;
 
     // Add only new offers (deduplicate)
     let newOffersCount = 0;
@@ -300,7 +292,7 @@ export async function fetchFreightOffers(
   // Strategy: Send all loading + unloading points in ONE request (like Trans.eu does)
   console.log(`🚛 Larry: Fetching offers with all points combined (${config.loadingPoints.length} loading, ${config.unloadingPoints.length} unloading)...`);
 
-  // Main request: all loading points → all unloading points
+  // Main request: all loading points → all unloading points (matches Trans.eu exactly)
   const mainOffers = await fetchPairMulti(config, config.loadingPoints, config.unloadingPoints);
   for (const offer of mainOffers) {
     if (!seenIds.has(offer.id)) {
@@ -310,7 +302,7 @@ export async function fetchFreightOffers(
   }
   console.log(`🚛 Larry: Main direction: ${allOffers.length} unique offers`);
 
-  // If return route enabled, also fetch reverse direction
+  // If return route enabled, fetch reverse direction as a SEPARATE request
   if (config.includeReturnRoute) {
     console.log(`🚛 Larry: Fetching return route (reverse direction)...`);
     const returnOffers = await fetchPairMulti(config, config.unloadingPoints, config.loadingPoints);
@@ -355,6 +347,7 @@ async function fetchPairMulti(
 
   const cleanToken = cleanBearerToken(config.bearerToken);
   const routeLabel = `${loadingPoints.map(p => p.locality || p.country).join('+')} → ${unloadingPoints.map(p => p.locality || p.country).join('+')}`;
+  let emptyPageRetries = 0;
 
   while (hasMore && pageCount < MAX_PAGES) {
     const params = new URLSearchParams({ 
