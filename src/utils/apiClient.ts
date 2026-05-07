@@ -128,6 +128,7 @@ async function fetchPair(
     });
 
     // Add pagination parameter with search_after cursor
+    // Trans.eu API uses the 'index' field value as cursor (same field used in sort)
     if (searchAfterId) {
       const pagination = JSON.stringify({ search_after: { id: searchAfterId } });
       params.set('pagination', pagination);
@@ -219,8 +220,12 @@ async function fetchPair(
     pageCount++;
 
     // Get the ID of the last offer for the next page cursor
+    // IMPORTANT: search_after must use the 'index' field (same field used in sort)
     const lastOffer = offers[offers.length - 1];
-    if (lastOffer && lastOffer.id) {
+    if (lastOffer && (lastOffer as any).index) {
+      searchAfterId = (lastOffer as any).index;
+    } else if (lastOffer && lastOffer.id) {
+      // Fallback to id if index not available
       searchAfterId = lastOffer.id;
     } else {
       hasMore = false;
