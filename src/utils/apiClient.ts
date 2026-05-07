@@ -1,4 +1,88 @@
 import type { ApiResponse, FreightOffer, RouteConfig, WayPoint } from '../types';
+import countryCodesData from '../data/countryCodes.json';
+import geocodeCache from '../data/geocodeCache.json';
+import { geocodeCity } from './transeuGeocode';
+
+/**
+ * Ensure waypoint has coordinates, geocoding if necessary
+ */
+async function ensureCoordinates(waypoint: WayPoint, bearerToken: string): Promise<WayPoint> {
+  // If coordinates are already present and non-zero, return as-is
+  if (waypoint.latitude !== 0 && waypoint.longitude !== 0) {
+    return waypoint;
+  }
+
+  // If no city name, can't geocode
+  if (!waypoint.locality || isCountryName(waypoint.locality)) {
+    return waypoint;
+  }
+
+  // Check cache first
+  const countryCode = extractCountryCode(waypoint.country);
+  const cacheKey = `${waypoint.locality}_${countryCode}`;
+  const cached = (geocodeCache.cache as Record<string, any>)[cacheKey];
+  
+  if (cached) {
+    console.log(`🌍 Larry: ✅ Using cached coordinates for ${waypoint.locality}: ${cached.latitude}, ${cached.longitude}`);
+    return {
+      ...waypoint,
+      latitude: cached.latitude,
+      longitude: cached.longitude,
+      postalCode: cached.postalCode || waypoint.postalCode
+    };
+  }
+
+  console.log(`🌍 Larry: Geocoding ${waypoint.locality} in ${waypoint.country}...`);
+  
+  try {
+    const result = await geocodeCity(waypoint.locality, countryCode, bearerToken);
+    
+    if (result) {
+      console.log(`🌍 Larry: ✅ Found coordinates for ${waypoint.locality}: ${result.latitude}, ${result.longitude}`);
+      return {
+        ...waypoint,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        postalCode: result.postalCode || waypoint.postalCode
+      };
+    } else {
+      console.warn(`🌍 Larry: ❌ Could not geocode ${waypoint.locality}`);
+      return waypoint;
+    }
+  } catch (error) {
+    console.warn(`🌍 Larry: Geocoding failed for ${waypoint.locality}:`, error);
+    return waypoint;
+  }
+}
+
+/**
+ * Extract country code from Trans.eu format (e.g., "47_poland" -> "PL")
+ */
+function extractCountryCode(transeuCountry: string): string {
+  // Map Trans.eu country codes back to ISO codes for geocoding
+  const reverseMap: Record<string, string> = {
+    '47_poland': 'PL',
+    '21_germany': 'DE', 
+    '19_france': 'FR',
+    '16_czech_republic': 'CZ',
+    '5_austria': 'AT',
+    '56_slovakia': 'SK',
+    '43_netherlands': 'NL',
+    '7_belgium': 'BE',
+    '28_italy': 'IT',
+    '58_spain': 'ES',
+    '26_hungary': 'HU',
+    '50_romania': 'RO',
+    '10_bulgaria': 'BG',
+    '25_croatia': 'HR',
+    '57_slovenia': 'SI',
+    '35_lithuania': 'LT',
+    '34_latvia': 'LV',
+    '18_estonia': 'EE'
+  };
+  
+  return reverseMap[transeuCountry] || transeuCountry.split('_')[1]?.toUpperCase()?.slice(0, 2) || 'PL';
+}
 
 /**
  * Clean bearer token to ensure it contains only ISO-8859-1 compatible characters
@@ -9,14 +93,10 @@ function cleanBearerToken(token: string): string {
 }
 
 /**
- * Build the filter query parameter for a specific loading->unloading pair
+ * Fix known incorrect country codes using centralized mapping
  */
-function buildFilterParam(
-  config: RouteConfig,
-  loadingPoint: WayPoint,
-  unloadingPoint: WayPoint
-): string {
-  return buildFilterParamMulti(config, [loadingPoint], [unloadingPoint]);
+function fixCountryCode(code: string): string {
+  return (countryCodesData.fixes as Record<string, string>)[code] || code;
 }
 
 /**
@@ -30,8 +110,9 @@ function buildFilterParamMulti(
 ): string {
   // Build loading places array
   const loadingPlaces = loadingPoints.map(lp => {
+    const country = fixCountryCode(lp.country);
     const address: Record<string, unknown> = {
-      country: [lp.country],
+      country: [country],
     };
     if (lp.locality && !isCountryName(lp.locality)) {
       address.locality = lp.locality;
@@ -45,23 +126,24 @@ function buildFilterParamMulti(
     // If only country (no city), mark as country-level search
     if (!lp.locality || isCountryName(lp.locality)) {
       place.isCountry = true;
-    }
-    
-    // Only include coordinates if they are valid (non-zero)
-    if (lp.latitude !== 0 && lp.longitude !== 0) {
-      place.coordinates = {
-        latitude: lp.latitude,
-        longitude: lp.longitude,
-        range: lp.range,
-      };
+    } else {
+      // Include coordinates for city-level searches (non-zero)
+      if (lp.latitude !== 0 && lp.longitude !== 0) {
+        place.coordinates = {
+          latitude: lp.latitude,
+          longitude: lp.longitude,
+          range: lp.range,
+        };
+      }
     }
     return place;
   });
 
   // Build unloading places array
   const unloadingPlaces = unloadingPoints.map(up => {
+    const country = fixCountryCode(up.country);
     const address: Record<string, unknown> = {
-      country: [up.country],
+      country: [country],
     };
     if (up.locality && !isCountryName(up.locality)) {
       address.locality = up.locality;
@@ -75,15 +157,15 @@ function buildFilterParamMulti(
     // If only country (no city), mark as country-level search
     if (!up.locality || isCountryName(up.locality)) {
       place.isCountry = true;
-    }
-    
-    // Only include coordinates if they are valid (non-zero)
-    if (up.latitude !== 0 && up.longitude !== 0) {
-      place.coordinates = {
-        latitude: up.latitude,
-        longitude: up.longitude,
-        range: up.range,
-      };
+    } else {
+      // Include coordinates for city-level searches (non-zero)
+      if (up.latitude !== 0 && up.longitude !== 0) {
+        place.coordinates = {
+          latitude: up.latitude,
+          longitude: up.longitude,
+          range: up.range,
+        };
+      }
     }
     return place;
   });
@@ -122,159 +204,13 @@ function isCountryName(name: string): boolean {
 }
 
 /**
- * Fetch freight offers for a single loading->unloading pair with pagination
- */
-async function fetchPair(
-  config: RouteConfig,
-  loadingPoint: WayPoint,
-  unloadingPoint: WayPoint
-): Promise<FreightOffer[]> {
-  const filter = buildFilterParam(config, loadingPoint, unloadingPoint);
-  const sort = JSON.stringify({ field: 'index', order: 'desc' });
-  const counters = JSON.stringify(['all']);
-
-  const allOffers: FreightOffer[] = [];
-  const seenIds = new Set<string>();
-  let searchAfterId: string | null = null;
-  let hasMore = true;
-  let pageCount = 0;
-  let expectedTotal = 0;
-  const MAX_PAGES = 50; // Safety limit: max 50 pages (~1000 offers at 20/page)
-
-  // Ensure bearer token contains only ISO-8859-1 compatible characters
-  const cleanToken = cleanBearerToken(config.bearerToken);
-
-  while (hasMore && pageCount < MAX_PAGES) {
-    const params = new URLSearchParams({ 
-      filter, 
-      sort, 
-      counters
-    });
-
-    // Add pagination parameter with search_after cursor
-    // Trans.eu API uses the 'index' field value as cursor (same field used in sort)
-    if (searchAfterId) {
-      const pagination = JSON.stringify({ search_after: { id: searchAfterId } });
-      params.set('pagination', pagination);
-    }
-
-    const url = `${config.apiUrl}?${params.toString()}`;
-
-    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${loadingPoint.locality} → ${unloadingPoint.locality} (have ${allOffers.length} offers so far)`);
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${cleanToken}`,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-      },
-      mode: 'cors',
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-      
-      if (response.status === 404) {
-        errorMessage += ` - The API endpoint might be incorrect or the route ${loadingPoint.locality} → ${unloadingPoint.locality} was not found`;
-      } else if (response.status === 401) {
-        errorMessage += ` - Invalid or expired bearer token. Please get a fresh token from platform.trans.eu`;
-      } else if (response.status === 403) {
-        errorMessage += ` - Access forbidden. Check your bearer token permissions`;
-      }
-      
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    const offers: FreightOffer[] = data._embedded?.['freight-offers'] || [];
-    
-    // On first page, capture the total count if available
-    if (pageCount === 0 && data.total) {
-      expectedTotal = data.total;
-      console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
-    }
-
-    console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
-    
-    if (offers.length === 0) {
-      // If we haven't reached expected total, try one more time with same cursor
-      // (API might have a temporary gap)
-      if (expectedTotal > 0 && allOffers.length < expectedTotal && emptyPageRetries < 2) {
-        emptyPageRetries++;
-        console.log(`🚛 Larry: Empty page but expected ${expectedTotal}, retry ${emptyPageRetries}/2`);
-        await new Promise(resolve => setTimeout(resolve, 300));
-        continue;
-      }
-      hasMore = false;
-      break;
-    }
-    
-    // Reset empty page retries on successful page
-    emptyPageRetries = 0;
-
-    // Add only new offers (deduplicate)
-    let newOffersCount = 0;
-    for (const offer of offers) {
-      if (!seenIds.has(offer.id)) {
-        seenIds.add(offer.id);
-        allOffers.push(offer);
-        newOffersCount++;
-      }
-    }
-
-    // If all offers on this page were duplicates, stop
-    if (newOffersCount === 0) {
-      console.log(`🚛 Larry: All offers on page ${pageCount + 1} are duplicates, stopping`);
-      hasMore = false;
-      break;
-    }
-
-    pageCount++;
-
-    // Get the ID of the last offer for the next page cursor
-    // IMPORTANT: search_after must use the 'index' field (same field used in sort)
-    const lastOffer = offers[offers.length - 1];
-    if (lastOffer && (lastOffer as any).index) {
-      searchAfterId = (lastOffer as any).index;
-    } else if (lastOffer && lastOffer.id) {
-      // Fallback to id if index not available
-      searchAfterId = lastOffer.id;
-    } else {
-      hasMore = false;
-      break;
-    }
-
-    // Check if we've fetched all expected offers
-    if (expectedTotal > 0 && allOffers.length >= expectedTotal) {
-      console.log(`🚛 Larry: Reached expected total (${expectedTotal}), stopping`);
-      hasMore = false;
-      break;
-    }
-
-    // Add a small delay between requests to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 150));
-  }
-
-  if (pageCount >= MAX_PAGES) {
-    console.warn(`🚛 Larry: Reached max page limit (${MAX_PAGES}) for ${loadingPoint.locality} → ${unloadingPoint.locality}`);
-  }
-
-  console.log(`🚛 Larry: ✅ Total ${allOffers.length} offers for ${loadingPoint.locality} → ${unloadingPoint.locality} (${pageCount} pages, expected: ${expectedTotal})`);
-  return allOffers;
-}
-
-/**
  * Fetch freight offers for all combinations of loading and unloading points.
  * Sends all loading/unloading points in a single request (matching Trans.eu behavior).
  * If includeReturnRoute is enabled, also fetches reverse directions.
  */
 export async function fetchFreightOffers(
   config: RouteConfig
-): Promise<ApiResponse> {
+): Promise<ApiResponse & { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] }> {
   // Check if bearer token is provided
   if (!config.bearerToken || config.bearerToken.trim() === '') {
     throw new Error('Bearer token is required. Please add your API token from platform.trans.eu');
@@ -286,26 +222,36 @@ export async function fetchFreightOffers(
     throw new Error('Bearer token contains invalid characters. Please ensure your token contains only standard ASCII characters.');
   }
 
+  // Geocode waypoints to ensure coordinates are available
+  console.log(`🌍 Larry: Ensuring coordinates for all waypoints...`);
+  const geocodedLoadingPoints = await Promise.all(
+    config.loadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
+  );
+  const geocodedUnloadingPoints = await Promise.all(
+    config.unloadingPoints.map(point => ensureCoordinates(point, config.bearerToken))
+  );
+
   const allOffers: FreightOffer[] = [];
   const seenIds = new Set<string>();
 
   // Strategy: Send all loading + unloading points in ONE request (like Trans.eu does)
-  console.log(`🚛 Larry: Fetching offers with all points combined (${config.loadingPoints.length} loading, ${config.unloadingPoints.length} unloading)...`);
+  console.log(`🚛 Larry: Fetching offers with all points combined (${geocodedLoadingPoints.length} loading, ${geocodedUnloadingPoints.length} unloading)...`);
 
   // Main request: all loading points → all unloading points (matches Trans.eu exactly)
-  const mainOffers = await fetchPairMulti(config, config.loadingPoints, config.unloadingPoints);
+  const mainOffers = await fetchPairMulti(config, geocodedLoadingPoints, geocodedUnloadingPoints);
   for (const offer of mainOffers) {
     if (!seenIds.has(offer.id)) {
       seenIds.add(offer.id);
       allOffers.push(offer);
     }
   }
-  console.log(`🚛 Larry: Main direction: ${allOffers.length} unique offers`);
+  console.log(`🚛 Larry: Main direction: ${mainOffers.length} unique offers`);
 
   // If return route enabled, fetch reverse direction as a SEPARATE request
+  let returnOffers: FreightOffer[] = [];
   if (config.includeReturnRoute) {
     console.log(`🚛 Larry: Fetching return route (reverse direction)...`);
-    const returnOffers = await fetchPairMulti(config, config.unloadingPoints, config.loadingPoints);
+    returnOffers = await fetchPairMulti(config, geocodedUnloadingPoints, geocodedLoadingPoints);
     let returnCount = 0;
     for (const offer of returnOffers) {
       if (!seenIds.has(offer.id)) {
@@ -314,7 +260,7 @@ export async function fetchFreightOffers(
         returnCount++;
       }
     }
-    console.log(`🚛 Larry: Return direction: ${returnCount} new unique offers`);
+    console.log(`🚛 Larry: Return direction: ${returnOffers.length} offers (${returnCount} new unique)`);
   }
 
   console.log(`🚛 Larry: ✅ Finished! Found ${allOffers.length} unique offers total`);
@@ -322,6 +268,8 @@ export async function fetchFreightOffers(
   return {
     _embedded: { 'freight-offers': allOffers },
     total: allOffers.length,
+    mainOffers,
+    returnOffers,
   };
 }
 
@@ -339,15 +287,15 @@ async function fetchPairMulti(
 
   const allOffers: FreightOffer[] = [];
   const seenIds = new Set<string>();
-  let searchAfterId: string | null = null;
+  let searchAfterValue: string | null = null;
   let hasMore = true;
   let pageCount = 0;
   let expectedTotal = 0;
-  const MAX_PAGES = 50;
+  let emptyPageRetries = 0;
+  const MAX_PAGES = 100; // Safety limit: max 100 pages
 
   const cleanToken = cleanBearerToken(config.bearerToken);
   const routeLabel = `${loadingPoints.map(p => p.locality || p.country).join('+')} → ${unloadingPoints.map(p => p.locality || p.country).join('+')}`;
-  let emptyPageRetries = 0;
 
   while (hasMore && pageCount < MAX_PAGES) {
     const params = new URLSearchParams({ 
@@ -356,14 +304,19 @@ async function fetchPairMulti(
       counters
     });
 
-    if (searchAfterId) {
-      const pagination = JSON.stringify({ search_after: { id: searchAfterId } });
+    // Trans.eu pagination uses search_after with the id of the last item
+    if (searchAfterValue) {
+      // Trans.eu format: pagination={"search_after":{"id":"<last_offer_id>"}}
+      const pagination = JSON.stringify({ search_after: { id: searchAfterValue } });
       params.set('pagination', pagination);
     }
 
     const url = `${config.apiUrl}?${params.toString()}`;
 
-    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${routeLabel} (have ${allOffers.length} offers so far)`);
+    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${routeLabel} (have ${allOffers.length} offers so far${searchAfterValue ? ', cursor: ' + searchAfterValue : ''})`);
+    if (searchAfterValue) {
+      console.log(`🚛 Larry: Pagination URL: ${url}`);
+    }
 
     const response = await fetch(url, {
       method: 'GET',
@@ -391,17 +344,69 @@ async function fetchPairMulti(
     const data = await response.json();
     const offers: FreightOffer[] = data._embedded?.['freight-offers'] || [];
     
-    if (pageCount === 0 && data.total) {
-      expectedTotal = data.total;
-      console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
+    // On first page, log response structure and capture total count
+    if (pageCount === 0) {
+      // Log response keys to understand API structure
+      const responseKeys = Object.keys(data);
+      console.log(`🚛 Larry: Response keys: ${responseKeys.join(', ')}`);
+      
+      if (data._embedded?.['freight-offers']?.length > 0) {
+        const sampleOffer = data._embedded['freight-offers'][0];
+        const offerKeys = Object.keys(sampleOffer);
+        console.log(`🚛 Larry: Offer keys: ${offerKeys.join(', ')}`);
+        console.log(`🚛 Larry: Sample offer.id = "${sampleOffer.id}" (type: ${typeof sampleOffer.id})`);
+        // Log ALL fields that could be pagination cursors
+        for (const key of offerKeys) {
+          const val = sampleOffer[key];
+          if (typeof val === 'string' || typeof val === 'number') {
+            console.log(`🚛 Larry: offer.${key} = "${val}"`);
+          }
+        }
+      }
+      
+      // Also log last offer on first page
+      if (offers.length > 0) {
+        const lastOfferFirstPage = offers[offers.length - 1];
+        console.log(`🚛 Larry: LAST offer on page 1: id="${lastOfferFirstPage.id}", all string fields:`);
+        for (const key of Object.keys(lastOfferFirstPage)) {
+          const val = (lastOfferFirstPage as any)[key];
+          if (typeof val === 'string' || typeof val === 'number') {
+            console.log(`🚛 Larry:   .${key} = "${val}"`);
+          }
+        }
+      }
+      
+      // Try different locations for total count
+      expectedTotal = data.total || data._meta?.total || 0;
+      
+      // Check counters
+      if (data.counters) {
+        console.log(`🚛 Larry: Counters: ${JSON.stringify(data.counters)}`);
+        if (data.counters.all && !expectedTotal) {
+          expectedTotal = data.counters.all;
+        }
+      }
+      
+      if (expectedTotal > 0) {
+        console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
+      }
     }
 
     console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
     
     if (offers.length === 0) {
+      // Retry once if we haven't reached expected total (API might have a gap)
+      if (expectedTotal > 0 && allOffers.length < expectedTotal && emptyPageRetries < 2) {
+        emptyPageRetries++;
+        console.log(`🚛 Larry: Empty page but expected ${expectedTotal} (have ${allOffers.length}), retry ${emptyPageRetries}/2`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue;
+      }
       hasMore = false;
       break;
     }
+    
+    emptyPageRetries = 0;
 
     let newOffersCount = 0;
     for (const offer of offers) {
@@ -412,7 +417,23 @@ async function fetchPairMulti(
       }
     }
 
-    if (newOffersCount === 0) {
+    // Only stop on duplicates if we got a FULL page of duplicates AND we have enough offers
+    if (newOffersCount === 0 && offers.length > 0) {
+      // If we haven't reached expected total, don't stop - try next page
+      if (expectedTotal > 0 && allOffers.length < expectedTotal) {
+        console.log(`🚛 Larry: Page ${pageCount + 1} all duplicates but haven't reached total (${allOffers.length}/${expectedTotal}), continuing...`);
+        pageCount++;
+        // Still need cursor from last offer
+        const lastOffer = offers[offers.length - 1];
+        if (lastOffer && lastOffer.id) {
+          searchAfterValue = lastOffer.id;
+        } else {
+          hasMore = false;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
       console.log(`🚛 Larry: All offers on page ${pageCount + 1} are duplicates, stopping`);
       hasMore = false;
       break;
@@ -420,23 +441,34 @@ async function fetchPairMulti(
 
     pageCount++;
 
+    // Get the cursor for the next page
+    // Trans.eu uses the offer ID for search_after pagination
     const lastOffer = offers[offers.length - 1];
-    if (lastOffer && (lastOffer as any).index) {
-      searchAfterId = (lastOffer as any).index;
-    } else if (lastOffer && lastOffer.id) {
-      searchAfterId = lastOffer.id;
+    
+    // Log what we have for pagination on every page
+    console.log(`🚛 Larry: Last offer on page ${pageCount}: id="${lastOffer.id}", index="${lastOffer.index}"`);
+    
+    if (lastOffer && lastOffer.id) {
+      searchAfterValue = lastOffer.id;
     } else {
+      console.log(`🚛 Larry: Cannot determine next page cursor (no id field), stopping`);
       hasMore = false;
       break;
     }
 
+    // Check if we've fetched all expected offers
     if (expectedTotal > 0 && allOffers.length >= expectedTotal) {
       console.log(`🚛 Larry: Reached expected total (${expectedTotal}), stopping`);
       hasMore = false;
       break;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 150));
+    // Small delay between requests to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  if (pageCount >= MAX_PAGES) {
+    console.warn(`🚛 Larry: Reached max page limit (${MAX_PAGES}) for ${routeLabel}`);
   }
 
   console.log(`🚛 Larry: ✅ Total ${allOffers.length} offers for ${routeLabel} (${pageCount} pages, expected: ${expectedTotal})`);

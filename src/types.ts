@@ -107,6 +107,7 @@ export interface RatingSummary {
 
 export interface FreightOffer {
   id: string;
+  index: string; // Used for pagination cursor
   created_at: string;
   publish_date: string;
   type: string;

@@ -55,8 +55,8 @@ function parseFiltersFromUrl(): Partial<RouteConfig> | null {
         locality: point.locality || '',
         postalCode: point.postalCode || '',
         country: point.country || '47_poland',
-        latitude: 0, // Will be geocoded later
-        longitude: 0,
+        latitude: point.latitude || 0,
+        longitude: point.longitude || 0,
         range: point.range || 50
       }));
     }
@@ -68,8 +68,8 @@ function parseFiltersFromUrl(): Partial<RouteConfig> | null {
         locality: point.locality || '',
         postalCode: point.postalCode || '',
         country: point.country || '21_germany',
-        latitude: 0, // Will be geocoded later
-        longitude: 0,
+        latitude: point.latitude || 0,
+        longitude: point.longitude || 0,
         range: point.range || 50
       }));
     }
@@ -136,11 +136,12 @@ const defaultConfig: RouteConfig = {
 
 function App() {
   const [config, setConfig] = useState<RouteConfig>(defaultConfig);
-  const [offers, setOffers] = useState<FreightOffer[]>([]);
+  const [mainOffers, setMainOffers] = useState<FreightOffer[]>([]);
+  const [returnOffers, setReturnOffers] = useState<FreightOffer[]>([]);
   const [routes, setRoutes] = useState<OptimizedRoute[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'offers' | 'routes'>('offers');
+  const [activeTab, setActiveTab] = useState<'offers' | 'return' | 'routes'>('offers');
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
 
   // Initialize extension messaging
@@ -183,30 +184,53 @@ function App() {
         const filters = event.data.filters;
         const newConfig = { ...config };
         
-        // Update loading points
+        // Update loading points - preserve existing coordinates if extension doesn't provide them
         if (filters.loadingPoints && filters.loadingPoints.length > 0) {
-          newConfig.loadingPoints = filters.loadingPoints.map((point: any, index: number) => ({
-            id: point.id || `lp${index + 1}`,
-            locality: point.locality || '',
-            postalCode: point.postalCode || '',
-            country: point.country || '47_poland',
-            latitude: 0,
-            longitude: 0,
-            range: point.range || 50
-          }));
+          newConfig.loadingPoints = filters.loadingPoints.map((point: any, index: number) => {
+            // Try to find matching existing point to preserve coordinates
+            const existing = config.loadingPoints[index];
+            
+            // Only use extension coordinates if they're non-zero
+            const hasValidCoords = point.latitude && point.longitude && 
+                                 point.latitude !== 0 && point.longitude !== 0;
+            
+            const lat = hasValidCoords ? point.latitude : (existing?.latitude || 0);
+            const lon = hasValidCoords ? point.longitude : (existing?.longitude || 0);
+            
+            return {
+              id: point.id || existing?.id || `lp${index + 1}`,
+              locality: point.locality || '',
+              postalCode: point.postalCode || '',
+              country: point.country || '47_poland',
+              latitude: lat,
+              longitude: lon,
+              range: point.range || existing?.range || 50
+            };
+          });
         }
         
-        // Update unloading points
+        // Update unloading points - preserve existing coordinates if extension doesn't provide them
         if (filters.unloadingPoints && filters.unloadingPoints.length > 0) {
-          newConfig.unloadingPoints = filters.unloadingPoints.map((point: any, index: number) => ({
-            id: point.id || `up${index + 1}`,
-            locality: point.locality || '',
-            postalCode: point.postalCode || '',
-            country: point.country || '21_germany',
-            latitude: 0,
-            longitude: 0,
-            range: point.range || 50
-          }));
+          newConfig.unloadingPoints = filters.unloadingPoints.map((point: any, index: number) => {
+            const existing = config.unloadingPoints[index];
+            
+            // Only use extension coordinates if they're non-zero
+            const hasValidCoords = point.latitude && point.longitude && 
+                                 point.latitude !== 0 && point.longitude !== 0;
+            
+            const lat = hasValidCoords ? point.latitude : (existing?.latitude || 0);
+            const lon = hasValidCoords ? point.longitude : (existing?.longitude || 0);
+            
+            return {
+              id: point.id || existing?.id || `up${index + 1}`,
+              locality: point.locality || '',
+              postalCode: point.postalCode || '',
+              country: point.country || '21_germany',
+              latitude: lat,
+              longitude: lon,
+              range: point.range || existing?.range || 50
+            };
+          });
         }
         
         // Update weight
@@ -286,7 +310,8 @@ function App() {
     try {
       const response = await fetchFreightOffers(config);
       const fetchedOffers = response._embedded['freight-offers'];
-      setOffers(fetchedOffers);
+      setMainOffers(response.mainOffers || []);
+      setReturnOffers(response.returnOffers || []);
 
       const home = config.homeBase;
       // Use first loading point as home base if homeBase is not properly set
@@ -357,17 +382,43 @@ function App() {
             className={`tab ${activeTab === 'offers' ? 'active' : ''}`}
             onClick={() => setActiveTab('offers')}
           >
-            📦 Offers ({loading ? '⏳ Loading...' : offers.length})
+            📦 Прямі маршрути ({loading ? '⏳' : mainOffers.length})
           </button>
+          {config.includeReturnRoute && (
+            <button
+              className={`tab ${activeTab === 'return' ? 'active' : ''}`}
+              onClick={() => setActiveTab('return')}
+            >
+              🔄 Зворотні маршрути ({loading ? '⏳' : returnOffers.length})
+            </button>
+          )}
           <button
             className={`tab ${activeTab === 'routes' ? 'active' : ''}`}
             onClick={() => setActiveTab('routes')}
           >
-            🏆 Optimized Routes ({routes.length})
+            🏆 Оптимізовані пропозиції ({routes.length})
           </button>
         </div>
 
-        {activeTab === 'offers' && <OffersTable offers={offers} onRowClick={handleOfferRowClick} />}
+        {activeTab === 'offers' && (
+          <>
+            <div className="route-stats">
+              <strong>Прямі маршрути:</strong> {mainOffers.length} пропозицій
+              {config.includeReturnRoute && (
+                <> | <strong>Зворотні маршрути:</strong> {returnOffers.length} пропозицій</>
+              )}
+            </div>
+            <OffersTable offers={mainOffers} onRowClick={handleOfferRowClick} />
+          </>
+        )}
+        {activeTab === 'return' && (
+          <>
+            <div className="route-stats">
+              <strong>Зворотні маршрути:</strong> {returnOffers.length} пропозицій
+            </div>
+            <OffersTable offers={returnOffers} onRowClick={handleOfferRowClick} />
+          </>
+        )}
         {activeTab === 'routes' && <RouteResults routes={routes} homeBase={config.homeBase} />}
       </main>
     </div>
