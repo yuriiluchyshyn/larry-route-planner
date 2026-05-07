@@ -173,6 +173,24 @@ async function fetchPair(
       console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
     }
 
+    // Log full response structure on first page to debug pagination
+    if (pageCount === 0) {
+      console.log('🚛 Larry: Full API response keys:', Object.keys(data));
+      if (data._links) console.log('🚛 Larry: _links:', JSON.stringify(data._links));
+      if (data.page) console.log('🚛 Larry: page:', JSON.stringify(data.page));
+      if (data.pagination) console.log('🚛 Larry: pagination:', JSON.stringify(data.pagination));
+      if (data.search_after) console.log('🚛 Larry: search_after:', JSON.stringify(data.search_after));
+      // Log last offer structure to find the correct cursor field
+      if (offers.length > 0) {
+        const last = offers[offers.length - 1];
+        console.log('🚛 Larry: Last offer keys:', Object.keys(last));
+        console.log('🚛 Larry: Last offer id:', last.id);
+        if ((last as any)._id) console.log('🚛 Larry: Last offer _id:', (last as any)._id);
+        if ((last as any).sort) console.log('🚛 Larry: Last offer sort:', (last as any).sort);
+        if ((last as any).index) console.log('🚛 Larry: Last offer index:', (last as any).index);
+      }
+    }
+
     console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
     
     if (offers.length === 0) {
