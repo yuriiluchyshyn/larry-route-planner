@@ -110,21 +110,28 @@ async function fetchPair(
   const counters = JSON.stringify(['all']);
 
   const allOffers: FreightOffer[] = [];
-  let offset = 0;
-  const limit = 100; // Fetch 100 offers per page (max allowed by most APIs)
+  let searchAfter: string | null = null;
+  const limit = 100; // Fetch 100 offers per page
   let hasMore = true;
+  let pageCount = 0;
 
   // Ensure bearer token contains only ISO-8859-1 compatible characters
   const cleanToken = cleanBearerToken(config.bearerToken);
 
-  while (hasMore) {
+  while (hasMore && pageCount < 20) { // Safety limit: max 20 pages (2000 offers)
     const params = new URLSearchParams({ 
       filter, 
       sort, 
       counters,
-      limit: limit.toString(),
-      offset: offset.toString()
+      limit: limit.toString()
     });
+
+    // Add pagination parameter if we have a search_after cursor
+    if (searchAfter) {
+      const pagination = JSON.stringify({ search_after: searchAfter });
+      params.set('pagination', pagination);
+    }
+
     const url = `${config.apiUrl}?${params.toString()}`;
 
     const response = await fetch(url, {
@@ -156,28 +163,36 @@ async function fetchPair(
     
     // Add offers to our collection
     allOffers.push(...offers);
+    pageCount++;
     
-    // Check if we have more pages
-    // If we got fewer offers than the limit, we've reached the end
-    if (offers.length < limit) {
-      hasMore = false;
-    } else {
-      offset += limit;
-      
-      // Safety check: don't fetch more than 1000 offers per pair to avoid infinite loops
-      if (offset >= 1000) {
-        console.warn(`Reached safety limit of 1000 offers for ${loadingPoint.locality} → ${unloadingPoint.locality}`);
+    // Check if we have more pages by looking for pagination info in response
+    // Trans.eu API typically includes pagination metadata in the response
+    if (data._links?.next || (offers.length === limit && offers.length > 0)) {
+      // Extract search_after cursor from the last offer
+      // This is typically the 'id' or 'index' field of the last item
+      const lastOffer = offers[offers.length - 1];
+      if (lastOffer && lastOffer.id) {
+        searchAfter = lastOffer.id;
+      } else {
+        // Fallback: if no ID, we can't continue pagination
         hasMore = false;
       }
+    } else {
+      hasMore = false;
+    }
+
+    // If we got fewer offers than the limit, we've likely reached the end
+    if (offers.length < limit) {
+      hasMore = false;
     }
 
     // Add a small delay between requests to be nice to the API
     if (hasMore) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
   }
 
-  console.log(`Fetched ${allOffers.length} offers for ${loadingPoint.locality} → ${unloadingPoint.locality}`);
+  console.log(`Fetched ${allOffers.length} offers for ${loadingPoint.locality} → ${unloadingPoint.locality} (${pageCount} pages)`);
   return allOffers;
 }
 
