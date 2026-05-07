@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Larry Route Planner",
+  "version": "1.0.0",
+  "description": "Freight route planning and optimization tool for Trans.eu platform",
+  
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  
+  "host_permissions": [
+    "https://platform.trans.eu/*",
+    "https://*.trans.eu/*"
+  ],
+  
+  "content_scripts": [
+    {
+      "matches": [
+        "https://platform.trans.eu/*",
+        "https://*.trans.eu/*"
+      ],
+      "css": ["content.css"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "larry-route-planner/*",
+        "*.html",
+        "*.css",
+        "*.js",
+        "*.json"
+      ],
+      "matches": [
+        "https://platform.trans.eu/*",
+        "https://*.trans.eu/*"
+      ]
+    }
+  ],
+  
+  "action": {
+    "default_title": "Larry Route Planner - Use the floating button on Trans.eu pages",
+    "default_icon": {
+      "16": "icon48.png",
+      "32": "icon48.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  
+  "icons": {
+    "16": "icon48.png",
+    "32": "icon48.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  
+  "background": {
+    "service_worker": "background.js"
+  }
+}

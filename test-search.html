@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Larry Search Functionality Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+        
+        .test-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .freight-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        .freight-table th,
+        .freight-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .freight-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        
+        .freight-table tr:hover {
+            background: #f0f7ff;
+        }
+        
+        .search-controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .search-controls input,
+        .search-controls button {
+            margin: 5px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .search-controls button {
+            background: #4a9eff;
+            color: white;
+            cursor: pointer;
+        }
+        
+        .search-controls button:hover {
+            background: #3580d4;
+        }
+        
+        .pagination {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .pagination button {
+            margin: 0 5px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+        }
+        
+        .pagination button.active {
+            background: #4a9eff;
+            color: white;
+        }
+        
+        .pagination button:hover:not(.active) {
+            background: #f0f0f0;
+        }
+        
+        .results {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e8f5e8;
+            border: 1px solid #c3e6cb;
+            border-radius: 6px;
+        }
+        
+        .larry-highlight {
+            background-color: #ffeb3b !important;
+            border: 2px solid #ff9800 !important;
+            box-shadow: 0 0 10px rgba(255, 152, 0, 0.5) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .larry-highlight td {
+            background-color: inherit !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚛 Larry Route Planner - Search Functionality Test</h1>
+        
+        <div class="test-section">
+            <h3>Search Controls</h3>
+            <div class="search-controls">
+                <input type="text" id="searchOfferId" placeholder="Offer ID (e.g., 12345)" />
+                <input type="text" id="searchCompany" placeholder="Company Name" />
+                <input type="text" id="searchLoading" placeholder="Loading City" />
+                <input type="text" id="searchUnloading" placeholder="Unloading City" />
+                <button onclick="testSearch()">🔍 Test Search</button>
+                <button onclick="clearHighlights()">Clear Highlights</button>
+            </div>
+            <div id="searchResults" class="results" style="display: none;"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>Sample Freight Offers Table</h3>
+            
+            <table class="freight-table" id="offersTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Offer ID</th>
+                        <th>Loading</th>
+                        <th>Loading Date</th>
+                        <th>Unloading</th>
+                        <th>Unloading Date</th>
+                        <th>Distance (km)</th>
+                        <th>Capacity (t)</th>
+                        <th>Price</th>
+                        <th>Company</th>
+                        <th>Rating</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr data-offer-id="12345">
+                        <td>1</td>
+                        <td>12345</td>
+                        <td><strong>Warsaw</strong><br><small>Poland</small></td>
+                        <td>2026-05-08 09:00</td>
+                        <td><strong>Berlin</strong><br><small>Germany</small></td>
+                        <td>2026-05-09 15:00</td>
+                        <td>573</td>
+                        <td>24</td>
+                        <td>1200 EUR</td>
+                        <td>Trans Express Ltd</td>
+                        <td>⭐ 4.5/5</td>
+                    </tr>
+                    <tr data-offer-id="12346">
+                        <td>2</td>
+                        <td>12346</td>
+                        <td><strong>Krakow</strong><br><small>Poland</small></td>
+                        <td>2026-05-08 14:00</td>
+                        <td><strong>Vienna</strong><br><small>Austria</small></td>
+                        <td>2026-05-09 10:00</td>
+                        <td>289</td>
+                        <td>20</td>
+                        <td>850 EUR</td>
+                        <td>Euro Logistics</td>
+                        <td>⭐ 4.2/5</td>
+                    </tr>
+                    <tr data-offer-id="12347">
+                        <td>3</td>
+                        <td>12347</td>
+                        <td><strong>Prague</strong><br><small>Czech Republic</small></td>
+                        <td>2026-05-09 08:00</td>
+                        <td><strong>Munich</strong><br><small>Germany</small></td>
+                        <td>2026-05-10 16:00</td>
+                        <td>385</td>
+                        <td>22</td>
+                        <td>950 EUR</td>
+                        <td>Central Transport</td>
+                        <td>⭐ 4.7/5</td>
+                    </tr>
+                    <tr data-offer-id="12348">
+                        <td>4</td>
+                        <td>12348</td>
+                        <td><strong>Budapest</strong><br><small>Hungary</small></td>
+                        <td>2026-05-09 12:00</td>
+                        <td><strong>Frankfurt</strong><br><small>Germany</small></td>
+                        <td>2026-05-11 09:00</td>
+                        <td>934</td>
+                        <td>25</td>
+                        <td>1450 EUR</td>
+                        <td>Trans Express Ltd</td>
+                        <td>⭐ 4.5/5</td>
+                    </tr>
+                    <tr data-offer-id="12349">
+                        <td>5</td>
+                        <td>12349</td>
+                        <td><strong>Amsterdam</strong><br><small>Netherlands</small></td>
+                        <td>2026-05-10 07:00</td>
+                        <td><strong>Hamburg</strong><br><small>Germany</small></td>
+                        <td>2026-05-11 14:00</td>
+                        <td>357</td>
+                        <td>18</td>
+                        <td>780 EUR</td>
+                        <td>North Cargo</td>
+                        <td>⭐ 4.1/5</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="pagination">
+                <button onclick="changePage(1)" class="active">1</button>
+                <button onclick="changePage(2)">2</button>
+                <button onclick="changePage(3)">3</button>
+                <button onclick="changePage(4)">Next</button>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>Test Instructions</h3>
+            <ol>
+                <li><strong>Test Offer ID Search:</strong> Enter "12345" in Offer ID field and click Test Search</li>
+                <li><strong>Test Company Search:</strong> Enter "Trans Express" in Company Name field</li>
+                <li><strong>Test City Search:</strong> Enter "Warsaw" in Loading City or "Berlin" in Unloading City</li>
+                <li><strong>Test Combined Search:</strong> Use multiple criteria together</li>
+                <li><strong>Test Not Found:</strong> Search for "99999" to test error handling</li>
+            </ol>
+            <p><strong>Expected Behavior:</strong> Found offers should be highlighted in yellow and scrolled into view.</p>
+        </div>
+    </div>
+
+    <script>
+        // Simulate the Larry search functionality for testing
+        class TestOfferSearcher {
+            constructor() {
+                this.tableSelector = '.freight-table';
+                this.rowSelector = 'tbody tr';
+            }
+            
+            searchInCurrentPage(criteria) {
+                const tables = document.querySelectorAll(this.tableSelector);
+                
+                if (tables.length === 0) {
+                    return {
+                        found: false,
+                        error: 'No freight offer tables found on the page'
+                    };
+                }
+
+                for (const table of tables) {
+                    const rows = table.querySelectorAll(this.rowSelector);
+                    
+                    for (let i = 0; i < rows.length; i++) {
+                        const row = rows[i];
+                        
+                        if (this.matchesRow(row, criteria)) {
+                            return {
+                                found: true,
+                                element: row,
+                                rowIndex: i
+                            };
+                        }
+                    }
+                }
+
+                return {
+                    found: false,
+                    error: 'Offer not found in current page'
+                };
+            }
+            
+            matchesRow(row, criteria) {
+                const rowText = row.textContent?.toLowerCase() || '';
+                
+                // Check offer ID
+                if (criteria.offerId) {
+                    const offerIdAttr = row.getAttribute('data-offer-id');
+                    
+                    if (offerIdAttr && offerIdAttr.includes(criteria.offerId)) {
+                        return true;
+                    }
+                    
+                    if (rowText.includes(criteria.offerId.toLowerCase())) {
+                        return true;
+                    }
+                }
+                
+                // Check company name
+                if (criteria.companyName && rowText.includes(criteria.companyName.toLowerCase())) {
+                    return true;
+                }
+                
+                // Check loading city
+                if (criteria.loadingCity && rowText.includes(criteria.loadingCity.toLowerCase())) {
+                    return true;
+                }
+                
+                // Check unloading city
+                if (criteria.unloadingCity && rowText.includes(criteria.unloadingCity.toLowerCase())) {
+                    return true;
+                }
+                
+                return false;
+            }
+            
+            scrollToElement(element, highlight = true) {
+                // Scroll element into view
+                element.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                    inline: 'nearest'
+                });
+
+                if (highlight) {
+                    // Add highlight class
+                    element.classList.add('larry-highlight');
+                    
+                    // Remove highlight after 3 seconds
+                    setTimeout(() => {
+                        element.classList.remove('larry-highlight');
+                    }, 3000);
+                }
+            }
+        }
+        
+        const searcher = new TestOfferSearcher();
+        
+        function testSearch() {
+            const criteria = {
+                offerId: document.getElementById('searchOfferId').value,
+                companyName: document.getElementById('searchCompany').value,
+                loadingCity: document.getElementById('searchLoading').value,
+                unloadingCity: document.getElementById('searchUnloading').value
+            };
+            
+            // Remove empty criteria
+            Object.keys(criteria).forEach(key => {
+                if (!criteria[key]) {
+                    delete criteria[key];
+                }
+            });
+            
+            if (Object.keys(criteria).length === 0) {
+                showResults('Please enter at least one search criterion', false);
+                return;
+            }
+            
+            const startTime = Date.now();
+            const result = searcher.searchInCurrentPage(criteria);
+            const searchTime = Date.now() - startTime;
+            
+            if (result.found && result.element) {
+                searcher.scrollToElement(result.element, true);
+                showResults(`✅ Found offer in row ${result.rowIndex + 1} (${searchTime}ms)`, true);
+            } else {
+                showResults(`❌ ${result.error} (${searchTime}ms)`, false);
+            }
+        }
+        
+        function showResults(message, success) {
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.textContent = message;
+            resultsDiv.style.display = 'block';
+            resultsDiv.style.background = success ? '#d4edda' : '#f8d7da';
+            resultsDiv.style.borderColor = success ? '#c3e6cb' : '#f5c6cb';
+            resultsDiv.style.color = success ? '#155724' : '#721c24';
+            
+            // Hide after 5 seconds
+            setTimeout(() => {
+                resultsDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        function clearHighlights() {
+            document.querySelectorAll('.larry-highlight').forEach(el => {
+                el.classList.remove('larry-highlight');
+            });
+            showResults('Highlights cleared', true);
+        }
+        
+        function changePage(page) {
+            // Simulate pagination
+            document.querySelectorAll('.pagination button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // In a real implementation, this would load new data
+            console.log('Changed to page:', page);
+        }
+        
+        // Test the search functionality on page load
+        console.log('Larry Search Test Page Loaded');
+        console.log('Available test criteria:');
+        console.log('- Offer IDs: 12345, 12346, 12347, 12348, 12349');
+        console.log('- Companies: Trans Express Ltd, Euro Logistics, Central Transport, North Cargo');
+        console.log('- Loading Cities: Warsaw, Krakow, Prague, Budapest, Amsterdam');
+        console.log('- Unloading Cities: Berlin, Vienna, Munich, Frankfurt, Hamburg');
+    </script>
+</body>
+</html>
