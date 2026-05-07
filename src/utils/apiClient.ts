@@ -16,57 +16,81 @@ function buildFilterParam(
   loadingPoint: WayPoint,
   unloadingPoint: WayPoint
 ): string {
-  // Build loading place address - only include non-empty fields
-  const loadingAddress: Record<string, unknown> = {
-    country: [loadingPoint.country],
-  };
-  if (loadingPoint.locality && !isCountryName(loadingPoint.locality)) {
-    loadingAddress.locality = loadingPoint.locality;
-  }
-  if (loadingPoint.postalCode && loadingPoint.postalCode.trim()) {
-    loadingAddress.postal_code = loadingPoint.postalCode;
-  }
+  return buildFilterParamMulti(config, [loadingPoint], [unloadingPoint]);
+}
 
-  // Build unloading place address - only include non-empty fields
-  const unloadingAddress: Record<string, unknown> = {
-    country: [unloadingPoint.country],
-  };
-  if (unloadingPoint.locality && !isCountryName(unloadingPoint.locality)) {
-    unloadingAddress.locality = unloadingPoint.locality;
-  }
-  if (unloadingPoint.postalCode && unloadingPoint.postalCode.trim()) {
-    unloadingAddress.postal_code = unloadingPoint.postalCode;
-  }
-
-  // Build loading place object
-  const loadingPlace: Record<string, unknown> = {
-    address: loadingAddress,
-  };
-  // Only include coordinates if they are valid (non-zero)
-  if (loadingPoint.latitude !== 0 && loadingPoint.longitude !== 0) {
-    loadingPlace.coordinates = {
-      latitude: loadingPoint.latitude,
-      longitude: loadingPoint.longitude,
-      range: loadingPoint.range,
+/**
+ * Build filter with multiple loading/unloading points in a single request
+ * This matches how Trans.eu platform sends requests
+ */
+function buildFilterParamMulti(
+  config: RouteConfig,
+  loadingPoints: WayPoint[],
+  unloadingPoints: WayPoint[]
+): string {
+  // Build loading places array
+  const loadingPlaces = loadingPoints.map(lp => {
+    const address: Record<string, unknown> = {
+      country: [lp.country],
     };
-  }
+    if (lp.locality && !isCountryName(lp.locality)) {
+      address.locality = lp.locality;
+    }
+    if (lp.postalCode && lp.postalCode.trim()) {
+      address.postal_code = lp.postalCode;
+    }
 
-  // Build unloading place object
-  const unloadingPlace: Record<string, unknown> = {
-    address: unloadingAddress,
-  };
-  // Only include coordinates if they are valid (non-zero)
-  if (unloadingPoint.latitude !== 0 && unloadingPoint.longitude !== 0) {
-    unloadingPlace.coordinates = {
-      latitude: unloadingPoint.latitude,
-      longitude: unloadingPoint.longitude,
-      range: unloadingPoint.range,
+    const place: Record<string, unknown> = { address };
+    
+    // If only country (no city), mark as country-level search
+    if (!lp.locality || isCountryName(lp.locality)) {
+      place.isCountry = true;
+    }
+    
+    // Only include coordinates if they are valid (non-zero)
+    if (lp.latitude !== 0 && lp.longitude !== 0) {
+      place.coordinates = {
+        latitude: lp.latitude,
+        longitude: lp.longitude,
+        range: lp.range,
+      };
+    }
+    return place;
+  });
+
+  // Build unloading places array
+  const unloadingPlaces = unloadingPoints.map(up => {
+    const address: Record<string, unknown> = {
+      country: [up.country],
     };
-  }
+    if (up.locality && !isCountryName(up.locality)) {
+      address.locality = up.locality;
+    }
+    if (up.postalCode && up.postalCode.trim()) {
+      address.postal_code = up.postalCode;
+    }
+
+    const place: Record<string, unknown> = { address };
+    
+    // If only country (no city), mark as country-level search
+    if (!up.locality || isCountryName(up.locality)) {
+      place.isCountry = true;
+    }
+    
+    // Only include coordinates if they are valid (non-zero)
+    if (up.latitude !== 0 && up.longitude !== 0) {
+      place.coordinates = {
+        latitude: up.latitude,
+        longitude: up.longitude,
+        range: up.range,
+      };
+    }
+    return place;
+  });
 
   const filter: Record<string, unknown> = {
-    loading_place: [loadingPlace],
-    unloading_place: [unloadingPlace],
+    loading_place: loadingPlaces,
+    unloading_place: unloadingPlaces,
     load_weight: { from: config.minWeight },
     cargo_capacity: { from: config.minCapacity },
     places_matching_type: "cross",
@@ -253,6 +277,7 @@ async function fetchPair(
 
 /**
  * Fetch freight offers for all combinations of loading and unloading points.
+ * Sends all loading/unloading points in a single request (matching Trans.eu behavior).
  * If includeReturnRoute is enabled, also fetches reverse directions.
  */
 export async function fetchFreightOffers(
@@ -272,65 +297,155 @@ export async function fetchFreightOffers(
   const allOffers: FreightOffer[] = [];
   const seenIds = new Set<string>();
 
-  // Build all pairs: each loading point × each unloading point
-  const pairs: { loading: WayPoint; unloading: WayPoint }[] = [];
+  // Strategy: Send all loading + unloading points in ONE request (like Trans.eu does)
+  console.log(`🚛 Larry: Fetching offers with all points combined (${config.loadingPoints.length} loading, ${config.unloadingPoints.length} unloading)...`);
 
-  for (const lp of config.loadingPoints) {
-    for (const up of config.unloadingPoints) {
-      pairs.push({ loading: lp, unloading: up });
+  // Main request: all loading points → all unloading points
+  const mainOffers = await fetchPairMulti(config, config.loadingPoints, config.unloadingPoints);
+  for (const offer of mainOffers) {
+    if (!seenIds.has(offer.id)) {
+      seenIds.add(offer.id);
+      allOffers.push(offer);
     }
   }
+  console.log(`🚛 Larry: Main direction: ${allOffers.length} unique offers`);
 
-  // If return route enabled, also add reverse pairs
+  // If return route enabled, also fetch reverse direction
   if (config.includeReturnRoute) {
-    for (const up of config.unloadingPoints) {
-      for (const lp of config.loadingPoints) {
-        pairs.push({ loading: up, unloading: lp });
+    console.log(`🚛 Larry: Fetching return route (reverse direction)...`);
+    const returnOffers = await fetchPairMulti(config, config.unloadingPoints, config.loadingPoints);
+    let returnCount = 0;
+    for (const offer of returnOffers) {
+      if (!seenIds.has(offer.id)) {
+        seenIds.add(offer.id);
+        allOffers.push(offer);
+        returnCount++;
       }
     }
+    console.log(`🚛 Larry: Return direction: ${returnCount} new unique offers`);
   }
 
-  console.log(`🚛 Larry: Fetching offers for ${pairs.length} route pairs with pagination...`);
-
-  // Fetch all pairs in parallel (with concurrency limit)
-  const BATCH_SIZE = 3; // Reduced to be gentler on the API
-  for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
-    const batch = pairs.slice(i, i + BATCH_SIZE);
-    
-    console.log(`🚛 Larry: Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(pairs.length / BATCH_SIZE)}`);
-    
-    try {
-      const results = await Promise.all(
-        batch.map((p) => fetchPair(config, p.loading, p.unloading))
-      );
-
-      for (const offers of results) {
-        for (const offer of offers) {
-          if (!seenIds.has(offer.id)) {
-            seenIds.add(offer.id);
-            allOffers.push(offer);
-          }
-        }
-      }
-
-      console.log(`🚛 Larry: Total unique offers so far: ${allOffers.length}`);
-    } catch (error) {
-      // Handle CORS and other network errors
-      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        throw new Error(
-          'CORS Error: Cannot access Trans.eu API from localhost. ' +
-          'Please use the Chrome Extension on platform.trans.eu instead, ' +
-          'or ensure you have a valid bearer token.'
-        );
-      }
-      throw error;
-    }
-  }
-
-  console.log(`🚛 Larry: Finished! Found ${allOffers.length} unique offers total`);
+  console.log(`🚛 Larry: ✅ Finished! Found ${allOffers.length} unique offers total`);
 
   return {
     _embedded: { 'freight-offers': allOffers },
     total: allOffers.length,
   };
+}
+
+/**
+ * Fetch with multiple loading/unloading points in a single filter (matching Trans.eu behavior)
+ */
+async function fetchPairMulti(
+  config: RouteConfig,
+  loadingPoints: WayPoint[],
+  unloadingPoints: WayPoint[]
+): Promise<FreightOffer[]> {
+  const filter = buildFilterParamMulti(config, loadingPoints, unloadingPoints);
+  const sort = JSON.stringify({ field: 'index', order: 'desc' });
+  const counters = JSON.stringify(['all']);
+
+  const allOffers: FreightOffer[] = [];
+  const seenIds = new Set<string>();
+  let searchAfterId: string | null = null;
+  let hasMore = true;
+  let pageCount = 0;
+  let expectedTotal = 0;
+  const MAX_PAGES = 50;
+
+  const cleanToken = cleanBearerToken(config.bearerToken);
+  const routeLabel = `${loadingPoints.map(p => p.locality || p.country).join('+')} → ${unloadingPoints.map(p => p.locality || p.country).join('+')}`;
+
+  while (hasMore && pageCount < MAX_PAGES) {
+    const params = new URLSearchParams({ 
+      filter, 
+      sort, 
+      counters
+    });
+
+    if (searchAfterId) {
+      const pagination = JSON.stringify({ search_after: { id: searchAfterId } });
+      params.set('pagination', pagination);
+    }
+
+    const url = `${config.apiUrl}?${params.toString()}`;
+
+    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${routeLabel} (have ${allOffers.length} offers so far)`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${cleanToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+      mode: 'cors',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+      if (response.status === 401) {
+        errorMessage += ` - Invalid or expired bearer token`;
+      } else if (response.status === 403) {
+        errorMessage += ` - Access forbidden`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    const offers: FreightOffer[] = data._embedded?.['freight-offers'] || [];
+    
+    if (pageCount === 0 && data.total) {
+      expectedTotal = data.total;
+      console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
+    }
+
+    console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
+    
+    if (offers.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    let newOffersCount = 0;
+    for (const offer of offers) {
+      if (!seenIds.has(offer.id)) {
+        seenIds.add(offer.id);
+        allOffers.push(offer);
+        newOffersCount++;
+      }
+    }
+
+    if (newOffersCount === 0) {
+      console.log(`🚛 Larry: All offers on page ${pageCount + 1} are duplicates, stopping`);
+      hasMore = false;
+      break;
+    }
+
+    pageCount++;
+
+    const lastOffer = offers[offers.length - 1];
+    if (lastOffer && (lastOffer as any).index) {
+      searchAfterId = (lastOffer as any).index;
+    } else if (lastOffer && lastOffer.id) {
+      searchAfterId = lastOffer.id;
+    } else {
+      hasMore = false;
+      break;
+    }
+
+    if (expectedTotal > 0 && allOffers.length >= expectedTotal) {
+      console.log(`🚛 Larry: Reached expected total (${expectedTotal}), stopping`);
+      hasMore = false;
+      break;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+
+  console.log(`🚛 Larry: ✅ Total ${allOffers.length} offers for ${routeLabel} (${pageCount} pages, expected: ${expectedTotal})`);
+  return allOffers;
 }
