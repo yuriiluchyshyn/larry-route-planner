@@ -110,10 +110,12 @@ async function fetchPair(
   const counters = JSON.stringify(['all']);
 
   const allOffers: FreightOffer[] = [];
+  const seenIds = new Set<string>();
   let searchAfterId: string | null = null;
   let hasMore = true;
   let pageCount = 0;
-  const MAX_PAGES = 30; // Safety limit: max 30 pages (~600 offers at 20/page)
+  let expectedTotal = 0;
+  const MAX_PAGES = 50; // Safety limit: max 50 pages (~1000 offers at 20/page)
 
   // Ensure bearer token contains only ISO-8859-1 compatible characters
   const cleanToken = cleanBearerToken(config.bearerToken);
@@ -125,7 +127,7 @@ async function fetchPair(
       counters
     });
 
-    // Add pagination parameter with search_after cursor (format: {"search_after":{"id":"..."}})
+    // Add pagination parameter with search_after cursor
     if (searchAfterId) {
       const pagination = JSON.stringify({ search_after: { id: searchAfterId } });
       params.set('pagination', pagination);
@@ -133,7 +135,7 @@ async function fetchPair(
 
     const url = `${config.apiUrl}?${params.toString()}`;
 
-    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${loadingPoint.locality} → ${unloadingPoint.locality}${searchAfterId ? ' (cursor: ' + searchAfterId.substring(0, 10) + '...)' : ''}`);
+    console.log(`🚛 Larry: Fetching page ${pageCount + 1} for ${loadingPoint.locality} → ${unloadingPoint.locality} (have ${allOffers.length} offers so far)`);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -141,8 +143,11 @@ async function fetchPair(
         Authorization: `Bearer ${cleanToken}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
       },
       mode: 'cors',
+      cache: 'no-store',
     });
 
     if (!response.ok) {
@@ -159,42 +164,67 @@ async function fetchPair(
       throw new Error(errorMessage);
     }
 
-    const data: ApiResponse = await response.json();
-    const offers = data._embedded['freight-offers'] || [];
+    const data = await response.json();
+    const offers: FreightOffer[] = data._embedded?.['freight-offers'] || [];
     
+    // On first page, capture the total count if available
+    if (pageCount === 0 && data.total) {
+      expectedTotal = data.total;
+      console.log(`🚛 Larry: API reports total of ${expectedTotal} offers available`);
+    }
+
     console.log(`🚛 Larry: Page ${pageCount + 1} returned ${offers.length} offers`);
     
-    // Add offers to our collection
-    allOffers.push(...offers);
-    pageCount++;
-    
-    // Determine if there are more pages
     if (offers.length === 0) {
-      // No offers returned - we're done
+      // No more offers
       hasMore = false;
-    } else {
-      // Get the ID of the last offer for the next page cursor
-      const lastOffer = offers[offers.length - 1];
-      if (lastOffer && lastOffer.id) {
-        searchAfterId = lastOffer.id;
-        // Continue fetching - Trans.eu returns ~20 per page
-        // We stop when we get 0 results
-      } else {
-        hasMore = false;
+      break;
+    }
+
+    // Add only new offers (deduplicate)
+    let newOffersCount = 0;
+    for (const offer of offers) {
+      if (!seenIds.has(offer.id)) {
+        seenIds.add(offer.id);
+        allOffers.push(offer);
+        newOffersCount++;
       }
     }
 
-    // Add a small delay between requests to avoid rate limiting
-    if (hasMore) {
-      await new Promise(resolve => setTimeout(resolve, 150));
+    // If all offers on this page were duplicates, stop
+    if (newOffersCount === 0) {
+      console.log(`🚛 Larry: All offers on page ${pageCount + 1} are duplicates, stopping`);
+      hasMore = false;
+      break;
     }
+
+    pageCount++;
+
+    // Get the ID of the last offer for the next page cursor
+    const lastOffer = offers[offers.length - 1];
+    if (lastOffer && lastOffer.id) {
+      searchAfterId = lastOffer.id;
+    } else {
+      hasMore = false;
+      break;
+    }
+
+    // Check if we've fetched all expected offers
+    if (expectedTotal > 0 && allOffers.length >= expectedTotal) {
+      console.log(`🚛 Larry: Reached expected total (${expectedTotal}), stopping`);
+      hasMore = false;
+      break;
+    }
+
+    // Add a small delay between requests to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 150));
   }
 
   if (pageCount >= MAX_PAGES) {
     console.warn(`🚛 Larry: Reached max page limit (${MAX_PAGES}) for ${loadingPoint.locality} → ${unloadingPoint.locality}`);
   }
 
-  console.log(`🚛 Larry: Total ${allOffers.length} offers for ${loadingPoint.locality} → ${unloadingPoint.locality} (${pageCount} pages)`);
+  console.log(`🚛 Larry: ✅ Total ${allOffers.length} offers for ${loadingPoint.locality} → ${unloadingPoint.locality} (${pageCount} pages, expected: ${expectedTotal})`);
   return allOffers;
 }
 
