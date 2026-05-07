@@ -117,7 +117,7 @@ const defaultConfig: RouteConfig = {
   minCapacity: 10,
   daysOnRoad: 7,
   maxEmptyRunPercent: 30,
-  minPricePerKm: 0.8,
+  minPricePerKm: 0,
   homeBase: {
     id: 'home',
     locality: 'Kraków',
@@ -301,9 +301,10 @@ function App() {
 
     try {
       const response = await fetchFreightOffers(config);
-      const fetchedOffers = response._embedded['freight-offers'];
-      setMainOffers(response.mainOffers || []);
-      setReturnOffers(response.returnOffers || []);
+      const mainArr = response.mainOffers || [];
+      const returnArr = response.returnOffers || [];
+      setMainOffers(mainArr);
+      setReturnOffers(returnArr);
 
       const home = config.homeBase;
       // Use first loading point as home base if homeBase is not properly set
@@ -311,18 +312,23 @@ function App() {
         (home.latitude === 0 || home.longitude === 0) 
         ? config.loadingPoints[0] 
         : home;
-        
-      const optimized = buildOptimizedRoutes(fetchedOffers, {
-        daysOnRoad: config.daysOnRoad,
-        maxEmptyRunPercent: config.maxEmptyRunPercent,
-        minPricePerKm: config.minPricePerKm,
-        homeBaseLat: homeBase.latitude,
-        homeBaseLon: homeBase.longitude,
-        departureFrom: config.departureFrom,
-        departureTo: config.departureTo,
-        returnFrom: config.returnFrom,
-        returnTo: config.returnTo,
-      });
+      
+      // Pass main + return separately so optimizer can build round-trip cycles
+      const optimized = buildOptimizedRoutes(
+        { mainOffers: mainArr, returnOffers: returnArr },
+        {
+          daysOnRoad: config.daysOnRoad,
+          maxEmptyRunPercent: config.maxEmptyRunPercent,
+          minPricePerKm: config.minPricePerKm,
+          homeBaseLat: homeBase.latitude,
+          homeBaseLon: homeBase.longitude,
+          departureFrom: config.departureFrom,
+          departureTo: config.departureTo,
+          returnFrom: config.returnFrom,
+          returnTo: config.returnTo,
+        }
+      );
+      console.log(`🏆 Larry: Got ${optimized.length} optimized routes`);
       setRoutes(optimized);
 
       if (optimized.length > 0) {

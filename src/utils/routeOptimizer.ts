@@ -126,19 +126,45 @@ interface OptimizerConfig {
  * Build optimized cyclic routes for Larry using Branch-and-Bound.
  * Home base is the start/end point, loading/unloading points are intermediate stops.
  * Routes must start and end at home base within the time window.
+ * 
+ * Accepts either a single merged offers array, or separate main/return arrays.
+ * When passed separate arrays, the optimizer can favor chains that go
+ * outbound (main) then back (return).
  */
 export function buildOptimizedRoutes(
-  offers: FreightOffer[],
+  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
   config: OptimizerConfig
 ): OptimizedRoute[] {
-  // Step 1: Filter offers by minPricePerKm (if price is available)
-  const filteredOffers = offers.filter((offer) => {
-    if (config.minPricePerKm <= 0) return true;
-    const distKm = (offer.freight.route.distance || 0) / 1000;
-    if (!offer.price.value || distKm === 0) return true;
-    const pricePerKm = offer.price.value / distKm;
-    return pricePerKm >= config.minPricePerKm;
-  });
+  // Normalize input: build a merged list with direction tags
+  let mergedOffers: FreightOffer[];
+  const directionMap = new Map<string, 'main' | 'return'>();
+
+  if (Array.isArray(offers)) {
+    mergedOffers = offers;
+  } else {
+    const { mainOffers, returnOffers } = offers;
+    mergedOffers = [];
+    const seen = new Set<string>();
+    for (const o of mainOffers) {
+      if (!seen.has(o.id)) {
+        seen.add(o.id);
+        mergedOffers.push(o);
+        directionMap.set(o.id, 'main');
+      }
+    }
+    for (const o of returnOffers) {
+      if (!seen.has(o.id)) {
+        seen.add(o.id);
+        mergedOffers.push(o);
+        directionMap.set(o.id, 'return');
+      }
+    }
+    console.log(`🏆 Larry: Optimizer input — main: ${mainOffers.length}, return: ${returnOffers.length}, merged unique: ${mergedOffers.length}`);
+  }
+
+  // No price filtering — all offers are eligible
+  const filteredOffers = mergedOffers;
+  console.log(`🏆 Larry: No price filtering, using all ${filteredOffers.length} offers`);
 
   // Step 2: Parse departure/return date ranges
   const depFrom = config.departureFrom
@@ -189,7 +215,6 @@ export function buildOptimizedRoutes(
   }
 
   const allRoutes: OptimizedRoute[] = [];
-  const MAX_ROUTES = 50;
   let bestScore = -Infinity;
 
   // Max allowed driving hours per day (EU rule)
@@ -259,7 +284,7 @@ export function buildOptimizedRoutes(
           cycleBonus +
           complianceBonus;
 
-        if (routeScore > bestScore - 400 || allRoutes.length < MAX_ROUTES) {
+        if (routeScore > bestScore - 400 || true) { // accept all
           if (routeScore > bestScore) bestScore = routeScore;
 
           // Create segments for each cycle
@@ -416,7 +441,7 @@ export function buildOptimizedRoutes(
           complianceBonus +
           returnBonus;
 
-        if ((routeScore > bestScore - 500 || allRoutes.length < MAX_ROUTES) && acceptRoute) {
+        if (acceptRoute) {
           if (routeScore > bestScore) bestScore = routeScore;
 
           const segments: RouteSegment[] = chain.map((idx, i) => {
@@ -530,8 +555,13 @@ export function buildOptimizedRoutes(
     }
   }
 
-  // Sort by score, deduplicate
-  allRoutes.sort((a, b) => b.score - a.score);
+  // Sort by Loaded km DESC, then Empty km ASC (more loaded is better, less empty is better)
+  allRoutes.sort((a, b) => {
+    if (b.loadedDistanceKm !== a.loadedDistanceKm) {
+      return b.loadedDistanceKm - a.loadedDistanceKm;
+    }
+    return a.emptyDistanceKm - b.emptyDistanceKm;
+  });
 
   // Improved deduplication for cyclic routes
   const seen = new Set<string>();
@@ -589,5 +619,6 @@ export function buildOptimizedRoutes(
     return true;
   });
 
-  return finalRoutes.slice(0, 20); // Increased limit to show more cyclic options
+  console.log(`🏆 Larry: Generated ${allRoutes.length} raw routes → ${finalRoutes.length} after dedup/subset removal`);
+  return finalRoutes; // no limit — return all
 }
