@@ -15,6 +15,9 @@ build/
 .env.test.local
 .env.production.local
 
+# AI Configuration (contains API keys)
+src/config/aiConfig.ts
+
 # IDE files
 .vscode/
 .idea/
