@@ -1,5 +1,5 @@
 import type { FreightOffer, OptimizedRoute, RouteSegment } from '../types';
-import { AI_MODELS, AI_REQUEST_CONFIG, AI_LIMITS, AI_ENDPOINTS, AI_PROMPT_TEMPLATE, getApiKey, initializeApiKeys } from '../config/aiConfig';
+import { AI_MODELS, AI_REQUEST_CONFIG, AI_LIMITS, AI_ENDPOINTS, getApiKey, initializeApiKeys, getAIPromptTemplate } from '../config/aiConfig';
 
 // Initialize API keys from config on module load
 initializeApiKeys();
@@ -190,7 +190,7 @@ ${prompt}
 /**
  * Generate a detailed prompt for AI route optimization using template
  */
-function generateAIPrompt(offers: FreightOffer[], config: AIOptimizerConfig): string {
+async function generateAIPrompt(offers: FreightOffer[], config: AIOptimizerConfig): Promise<string> {
   const offersSummary = offers.map((offer, idx) => {
     const loadingSpot = offer.freight.spots.find(s => 
       s.operations.some(o => o.type === 'loading')
@@ -217,8 +217,11 @@ function generateAIPrompt(offers: FreightOffer[], config: AIOptimizerConfig): st
     return `${idx + 1}. ID:${offer.id} | ${loadingSpot?.place.address.locality},${loadingSpot?.place.address.country}→${unloadingSpot?.place.address.locality},${unloadingSpot?.place.address.country} | ${Math.round((offer.freight.route.distance || 0) / 1000)}km | ${offer.price.value || '-'}${offer.price.currency} | Load:${loadBegin}—${loadEnd} | Unload:${unloadBegin}—${unloadEnd} | ${offer.freight.requirements.transport.total_weight || '-'}t | ${loadingSpot?.place.coordinates.latitude.toFixed(3)},${loadingSpot?.place.coordinates.longitude.toFixed(3)}→${unloadingSpot?.place.coordinates.latitude.toFixed(3)},${unloadingSpot?.place.coordinates.longitude.toFixed(3)}`;
   }).join('\n');
 
+  // Load template from MD file
+  const template = await getAIPromptTemplate();
+
   // Replace placeholders in template
-  return AI_PROMPT_TEMPLATE
+  return template
     .replace(/\{\{HOME_LAT\}\}/g, config.homeBaseLat.toString())
     .replace(/\{\{HOME_LON\}\}/g, config.homeBaseLon.toString())
     .replace(/\{\{DEPARTURE_FROM\}\}/g, config.departureFrom)
@@ -671,6 +674,9 @@ function parseAIResponse(
   
   console.log(`🤖 Larry AI: Processing ${parsedResponse.routes.length} routes from AI`);
   
+  let processedCount = 0;
+  let skippedCount = 0;
+  
   for (const aiRoute of parsedResponse.routes) {
     try {
       // Validate AI route data
@@ -784,20 +790,15 @@ function parseAIResponse(
       const emptyPercent = totalDistance > 0 ? (totalEmpty / totalDistance) * 100 : 0;
       const totalDriving = aiRoute.totalDrivingHours !== undefined ? aiRoute.totalDrivingHours : (segments.reduce((sum, s) => sum + s.drivingHours, 0) + (returnDistanceKm / config.averageSpeedKmh));
       
-      // Filter out routes where empty run exceeds limit
+      // Log info but DON'T filter — user decides what routes to use
       if (emptyPercent > config.maxEmptyRunPercent) {
-        console.warn(`🤖 Larry AI: Filtering route with ${emptyPercent.toFixed(1)}% empty run (AI said ${aiRoute.emptyRunPercent}%, our calc: ${(calculatedEmpty / totalDistance * 100).toFixed(1)}%)`);
-        continue;
-      }
-
-      // Log warnings but DON'T skip routes — user decides
-      if (emptyPercent > config.maxEmptyRunPercent) {
-        console.warn(`🤖 Larry AI: Route has ${emptyPercent.toFixed(1)}% empty run (target: <${config.maxEmptyRunPercent}%)`);
+        console.info(`🤖 Larry AI: Route has ${emptyPercent.toFixed(1)}% empty run (target: <${config.maxEmptyRunPercent}%)`);
       }
       if (segments.length < 2) {
-        console.warn(`🤖 Larry AI: Skipping single-offer route (need 2+ offers per route)`);
-        continue; // Тільки одиночні маршрути відкидаємо
+        console.info(`🤖 Larry AI: Single-offer route (${segments.length} offers)`);
       }
+
+      processedCount++;
 
       const optimizedRoute: OptimizedRoute = {
         segments,
@@ -820,11 +821,11 @@ function parseAIResponse(
       
     } catch (routeError) {
       console.error('🤖 Larry AI: Error processing route:', routeError, aiRoute);
-      // Continue with other routes
+      // Continue with other routes - don't increment counters for errors
     }
   }
 
-  console.log(`🤖 Larry AI: Successfully parsed ${routes.length} routes from AI response`);
+  console.log(`🤖 Larry AI: Successfully parsed ${routes.length} routes from AI response (processed: ${processedCount})`);
   
   if (routes.length === 0) {
     throw new Error('Не вдалося створити жодного валідного маршруту з AI відповіді');
@@ -1013,7 +1014,7 @@ export async function buildAIOptimizedRoutes(
   
   try {
     // Generate AI prompt
-    const prompt = generateAIPrompt(offersForAI, config);
+    const prompt = await generateAIPrompt(offersForAI, config);
     console.log(`🤖 Larry AI: Generated prompt (${prompt.length} characters, ${offersForAI.length} offers)`);
     
     // Save prompt to file for debugging
@@ -1037,7 +1038,7 @@ export async function buildAIOptimizedRoutes(
         if (statusCallback) statusCallback(`🤖 ${message}...`);
         
         const reducedOffers = offersForAI.slice(0, reducedCount);
-        const reducedPrompt = generateAIPrompt(reducedOffers, config);
+        const reducedPrompt = await generateAIPrompt(reducedOffers, config);
         console.log(`🤖 Larry AI: Reduced prompt (${reducedPrompt.length} characters, ${reducedOffers.length} offers)`);
         
         // Save reduced prompt to file
@@ -1054,7 +1055,7 @@ export async function buildAIOptimizedRoutes(
             if (statusCallback) statusCallback(`🤖 ${finalMessage}...`);
             
             const minOffers = offersForAI.slice(0, minCount);
-            const minPrompt = generateAIPrompt(minOffers, config);
+            const minPrompt = await generateAIPrompt(minOffers, config);
             
             // Save final reduced prompt to file
             savePromptToFile(minPrompt, config, minOffers.length);

@@ -254,8 +254,8 @@ export function buildOptimizedRoutes(
     const cycleTotalDist = cycleLoaded + cycleEmpty;
     const cycleEmptyPercent = cycleTotalDist > 0 ? (cycleEmpty / cycleTotalDist) * 100 : 0;
     
-    // Only consider if empty run is acceptable
-    if (cycleEmptyPercent <= config.maxEmptyRunPercent) {
+    // Consider all routes regardless of empty run percentage - user decides
+    if (cycleEmptyPercent <= config.maxEmptyRunPercent * 2) { // Relaxed check, just to avoid completely unrealistic routes
       const cycleDrivingHours = distanceToDrivingHours(cycleTotalDist, config.averageSpeedKmh);
       const cycleDurationMs = unloadTime - loadTime + 12 * 60 * 60 * 1000; // add 12h for return
       
@@ -396,7 +396,7 @@ export function buildOptimizedRoutes(
       const emptyPercent = totalDist > 0 ? (totalEmpty / totalDist) * 100 : 0;
       const totalDrivingHours = currentDrivingHours + returnDriving;
 
-      if (emptyPercent <= config.maxEmptyRunPercent && chain.length >= 1) {
+      if (emptyPercent <= config.maxEmptyRunPercent * 2 && chain.length >= 1) { // Relaxed filter
         // Check departure date range: first loading must be within departure window
         const firstLoadTime = loadDates[chain[0]];
         if (firstLoadTime < depFrom || firstLoadTime > depTo) {
@@ -522,7 +522,7 @@ export function buildOptimizedRoutes(
           const newLoaded = currentLoaded + distances[j];
           const optimisticEmptyPercent =
             (newEmpty / (newLoaded + newEmpty)) * 100;
-          if (optimisticEmptyPercent > config.maxEmptyRunPercent * 1.5) continue;
+          if (optimisticEmptyPercent > config.maxEmptyRunPercent * 3) continue; // Very relaxed filter
 
           const potential = distances[j] * 2 - emptyToJ * 3;
           candidates.push({ idx: j, potential });
