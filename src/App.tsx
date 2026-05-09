@@ -5,6 +5,7 @@ import { OffersTable } from './components/OffersTable';
 import { RouteResults } from './components/RouteResults';
 import { fetchFreightOffers } from './utils/apiClient';
 import { buildOptimizedRoutes } from './utils/routeOptimizer';
+import { buildAIOptimizedRoutes, getLastAIPaginationMetadata, loadNextAIPage } from './utils/aiOptimizer';
 import type { FreightOffer, OptimizedRoute, RouteConfig } from './types';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -75,8 +76,18 @@ function parseFiltersFromUrl(): Partial<RouteConfig> | null {
     }
     
     // Map weight filters
-    if (filters.minWeight) {
+    if (filters.minWeight !== undefined && filters.minWeight !== null) {
       config.minWeight = filters.minWeight;
+    }
+    if (filters.maxWeight !== undefined && filters.maxWeight !== null) {
+      config.maxWeight = filters.maxWeight;
+    }
+    // Map capacity filter from extension
+    if (filters.minCapacity !== undefined && filters.minCapacity !== null) {
+      config.minCapacity = filters.minCapacity;
+    }
+    if (filters.maxCapacity !== undefined && filters.maxCapacity !== null) {
+      config.maxCapacity = filters.maxCapacity;
     }
     
     return config;
@@ -113,11 +124,11 @@ const defaultConfig: RouteConfig = {
       range: 50,
     },
   ],
-  minWeight: urlFilters?.minWeight || 10,
-  minCapacity: 10,
-  daysOnRoad: 7,
-  maxEmptyRunPercent: 30,
-  minPricePerKm: 0,
+  minWeight: urlFilters?.minWeight || 0,
+  maxWeight: urlFilters?.maxWeight,
+  minCapacity: 0,
+  maxCapacity: urlFilters?.maxCapacity,
+  maxEmptyRunPercent: 10,
   homeBase: {
     id: 'home',
     locality: 'Kraków',
@@ -132,6 +143,9 @@ const defaultConfig: RouteConfig = {
   departureTo: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
   returnFrom: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
   returnTo: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+  useAIOptimization: false, // Default to internal algorithm
+  pricePerKm: 1.5, // Default 1.5 EUR per km
+  averageSpeedKmh: 80, // Default 80 km/h average speed
 };
 
 function App() {
@@ -143,6 +157,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'offers' | 'return' | 'routes'>('offers');
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [aiPaginationMeta, setAiPaginationMeta] = useState<{totalRoutesFound: number; returnedRoutesCount: number; nextPagePrompt: string | null} | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Initialize extension messaging
   useEffect(() => {
@@ -183,6 +201,14 @@ function App() {
         console.log('Larry: Received filters from extension:', event.data.filters);
         const filters = event.data.filters;
         const newConfig = { ...config };
+        
+        // Log current config before update
+        console.log('Larry: Current config before update:', {
+          minWeight: newConfig.minWeight,
+          maxWeight: newConfig.maxWeight,
+          minCapacity: newConfig.minCapacity,
+          maxCapacity: newConfig.maxCapacity
+        });
         
         // Helper to deduplicate points by country+locality+postalCode key
         const dedupe = (points: any[]) => {
@@ -225,10 +251,32 @@ function App() {
           }));
         }
         
-        // Update weight
-        if (filters.minWeight) {
+        // Update weight with detailed logging
+        if (filters.minWeight !== undefined && filters.minWeight !== null) {
+          console.log('Larry: Setting minWeight from extension:', filters.minWeight);
           newConfig.minWeight = filters.minWeight;
         }
+        if (filters.maxWeight !== undefined && filters.maxWeight !== null) {
+          console.log('Larry: Setting maxWeight from extension:', filters.maxWeight);
+          newConfig.maxWeight = filters.maxWeight;
+        }
+        // Update capacity from extension
+        if (filters.minCapacity !== undefined && filters.minCapacity !== null) {
+          console.log('Larry: Setting minCapacity from extension:', filters.minCapacity);
+          newConfig.minCapacity = filters.minCapacity;
+        }
+        if (filters.maxCapacity !== undefined && filters.maxCapacity !== null) {
+          console.log('Larry: Setting maxCapacity from extension:', filters.maxCapacity);
+          newConfig.maxCapacity = filters.maxCapacity;
+        }
+        
+        // Log final config after update
+        console.log('Larry: Final config after update:', {
+          minWeight: newConfig.minWeight,
+          maxWeight: newConfig.maxWeight,
+          minCapacity: newConfig.minCapacity,
+          maxCapacity: newConfig.maxCapacity
+        });
         
         setConfig(newConfig);
       }
@@ -314,21 +362,56 @@ function App() {
         : home;
       
       // Pass main + return separately so optimizer can build round-trip cycles
-      const optimized = buildOptimizedRoutes(
-        { mainOffers: mainArr, returnOffers: returnArr },
-        {
-          daysOnRoad: config.daysOnRoad,
-          maxEmptyRunPercent: config.maxEmptyRunPercent,
-          minPricePerKm: config.minPricePerKm,
-          homeBaseLat: homeBase.latitude,
-          homeBaseLon: homeBase.longitude,
-          departureFrom: config.departureFrom,
-          departureTo: config.departureTo,
-          returnFrom: config.returnFrom,
-          returnTo: config.returnTo,
+      let optimized: OptimizedRoute[];
+      
+      if (config.useAIOptimization) {
+        console.log('🤖 Larry: Using AI optimization');
+        setAiStatus('🤖 AI аналізує пропозиції...');
+        
+        try {
+          optimized = await buildAIOptimizedRoutes(
+            { mainOffers: mainArr, returnOffers: returnArr },
+            {
+              maxEmptyRunPercent: config.maxEmptyRunPercent,
+              homeBaseLat: homeBase.latitude,
+              homeBaseLon: homeBase.longitude,
+              departureFrom: config.departureFrom,
+              departureTo: config.departureTo,
+              returnFrom: config.returnFrom,
+              returnTo: config.returnTo,
+              averageSpeedKmh: config.averageSpeedKmh,
+            },
+            setAiStatus // Pass status callback
+          );
+          setAiStatus('✅ AI оптимізація завершена');
+          setAiPaginationMeta(getLastAIPaginationMetadata());
+          setTimeout(() => setAiStatus(null), 3000);
+        } catch (aiError) {
+          console.error('AI optimization failed:', aiError);
+          setAiStatus(`❌ AI оптимізація не вдалася: ${aiError instanceof Error ? aiError.message : 'Невідома помилка'}`);
+          setAiPaginationMeta(null);
+          optimized = []; // No fallback — show empty results
+          setTimeout(() => setAiStatus(null), 5000);
         }
-      );
-      console.log(`🏆 Larry: Got ${optimized.length} optimized routes`);
+      } else {
+        console.log('🏆 Larry: Using internal algorithm optimization');
+        optimized = buildOptimizedRoutes(
+          { mainOffers: mainArr, returnOffers: returnArr },
+          {
+            daysOnRoad: 7, // Default to 7 days
+            maxEmptyRunPercent: config.maxEmptyRunPercent,
+            minPricePerKm: 0, // Default to no minimum price filtering
+            homeBaseLat: homeBase.latitude,
+            homeBaseLon: homeBase.longitude,
+            departureFrom: config.departureFrom,
+            departureTo: config.departureTo,
+            returnFrom: config.returnFrom,
+            returnTo: config.returnTo,
+            averageSpeedKmh: config.averageSpeedKmh,
+          }
+        );
+      }
+      console.log(`${config.useAIOptimization ? '🤖 AI' : '🏆 Internal'}: Got ${optimized.length} optimized routes`);
       setRoutes(optimized);
 
       if (optimized.length > 0) {
@@ -340,6 +423,133 @@ function App() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Re-optimize routes using already loaded offers (no re-fetch)
+  const handleReoptimize = async () => {
+    if (mainOffers.length === 0 && returnOffers.length === 0) {
+      setError('Спочатку завантажте пропозиції (Fetch Offers)');
+      return;
+    }
+
+    setOptimizing(true);
+    setError(null);
+    setAiStatus(config.useAIOptimization ? '🤖 AI аналізує пропозиції...' : null);
+
+    try {
+      const home = config.homeBase;
+      const homeBase = config.loadingPoints.length > 0 && 
+        (home.latitude === 0 || home.longitude === 0) 
+        ? config.loadingPoints[0] 
+        : home;
+
+      let optimized: OptimizedRoute[];
+
+      if (config.useAIOptimization) {
+        try {
+          optimized = await buildAIOptimizedRoutes(
+            { mainOffers, returnOffers },
+            {
+              maxEmptyRunPercent: config.maxEmptyRunPercent,
+              homeBaseLat: homeBase.latitude,
+              homeBaseLon: homeBase.longitude,
+              departureFrom: config.departureFrom,
+              departureTo: config.departureTo,
+              returnFrom: config.returnFrom,
+              returnTo: config.returnTo,
+              averageSpeedKmh: config.averageSpeedKmh,
+            },
+            setAiStatus // Pass status callback
+          );
+          console.log(`🤖 AI returned ${optimized.length} routes:`, optimized);
+          setAiStatus('✅ AI оптимізація завершена');
+          setAiPaginationMeta(getLastAIPaginationMetadata());
+          setTimeout(() => setAiStatus(null), 3000);
+        } catch (aiError) {
+          console.error('AI optimization failed:', aiError);
+          setAiStatus(`❌ AI оптимізація не вдалася: ${aiError instanceof Error ? aiError.message : 'Невідома помилка'}`);
+          setAiPaginationMeta(null);
+          optimized = []; // No fallback — show empty results
+          setTimeout(() => setAiStatus(null), 5000);
+        }
+      } else {
+        optimized = buildOptimizedRoutes(
+          { mainOffers, returnOffers },
+          {
+            daysOnRoad: 7,
+            maxEmptyRunPercent: config.maxEmptyRunPercent,
+            minPricePerKm: 0,
+            homeBaseLat: homeBase.latitude,
+            homeBaseLon: homeBase.longitude,
+            departureFrom: config.departureFrom,
+            departureTo: config.departureTo,
+            returnFrom: config.returnFrom,
+            returnTo: config.returnTo,
+            averageSpeedKmh: config.averageSpeedKmh,
+          }
+        );
+      }
+
+      console.log(`${config.useAIOptimization ? '🤖 AI' : '🏆 Internal'}: Re-optimized ${optimized.length} routes`);
+      console.log('Setting routes to state:', optimized);
+      setRoutes(optimized);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  // Load more AI routes (pagination)
+  const handleLoadMore = async () => {
+    if (!aiPaginationMeta?.nextPagePrompt) return;
+
+    setLoadingMore(true);
+    setAiStatus('🤖 Завантажую наступну порцію маршрутів...');
+
+    try {
+      const home = config.homeBase;
+      const homeBase = config.loadingPoints.length > 0 && 
+        (home.latitude === 0 || home.longitude === 0) 
+        ? config.loadingPoints[0] 
+        : home;
+
+      // Merge all offers for parsing
+      const allOffers = [...mainOffers, ...returnOffers].filter(
+        (offer, idx, arr) => arr.findIndex(o => o.id === offer.id) === idx
+      );
+
+      const newRoutes = await loadNextAIPage(
+        aiPaginationMeta.nextPagePrompt,
+        allOffers,
+        {
+          maxEmptyRunPercent: config.maxEmptyRunPercent,
+          homeBaseLat: homeBase.latitude,
+          homeBaseLon: homeBase.longitude,
+          departureFrom: config.departureFrom,
+          departureTo: config.departureTo,
+          returnFrom: config.returnFrom,
+          returnTo: config.returnTo,
+          averageSpeedKmh: config.averageSpeedKmh,
+        },
+        setAiStatus
+      );
+
+      // APPEND new routes to existing ones
+      setRoutes(prev => [...prev, ...newRoutes]);
+      
+      // Update pagination metadata
+      setAiPaginationMeta(getLastAIPaginationMetadata());
+      
+      setAiStatus(`✅ Завантажено ще ${newRoutes.length} маршрутів`);
+      setTimeout(() => setAiStatus(null), 3000);
+    } catch (err) {
+      console.error('Load more failed:', err);
+      setAiStatus(`❌ ${err instanceof Error ? err.message : 'Помилка завантаження'}`);
+      setTimeout(() => setAiStatus(null), 5000);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -375,6 +585,12 @@ function App() {
           </div>
         )}
 
+        {aiStatus && (
+          <div className={`search-status ${aiStatus.includes('✅') ? 'success' : aiStatus.includes('❌') ? 'error' : 'info'}`}>
+            {aiStatus}
+          </div>
+        )}
+
         <div className="tabs">
           <button
             className={`tab ${activeTab === 'offers' ? 'active' : ''}`}
@@ -394,30 +610,75 @@ function App() {
             className={`tab ${activeTab === 'routes' ? 'active' : ''}`}
             onClick={() => setActiveTab('routes')}
           >
-            🏆 Оптимізовані пропозиції ({routes.length})
+            {config.useAIOptimization 
+              ? `🤖 AI Оптимізовані (${routes.length}/${aiPaginationMeta?.totalRoutesFound || routes.length})`
+              : `🏆 Оптимізовані пропозиції (${routes.length})`
+            }
+            {(mainOffers.length > 0 || returnOffers.length > 0) && (
+              <span
+                className={`tab-refresh-inline ${optimizing ? 'spinning' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!optimizing) handleReoptimize();
+                }}
+                title="Переоптимізувати маршрути"
+              >
+                🔄
+              </span>
+            )}
           </button>
+          {activeTab === 'routes' && (mainOffers.length > 0 || returnOffers.length > 0) && (
+            <button
+              className="tab-refresh-btn"
+              onClick={handleReoptimize}
+              disabled={loading}
+              title="Переоптимізувати маршрути на основі завантажених пропозицій"
+            >
+              {loading ? '⏳' : '🔄'}
+            </button>
+          )}
         </div>
 
         {activeTab === 'offers' && (
           <>
-            <div className="route-stats">
-              <strong>Прямі маршрути:</strong> {mainOffers.length} пропозицій
-              {config.includeReturnRoute && (
-                <> | <strong>Зворотні маршрути:</strong> {returnOffers.length} пропозицій</>
-              )}
-            </div>
+          
             <OffersTable offers={mainOffers} onRowClick={handleOfferRowClick} />
           </>
         )}
         {activeTab === 'return' && (
           <>
-            <div className="route-stats">
-              <strong>Зворотні маршрути:</strong> {returnOffers.length} пропозицій
-            </div>
+        
             <OffersTable offers={returnOffers} onRowClick={handleOfferRowClick} />
           </>
         )}
-        {activeTab === 'routes' && <RouteResults routes={routes} homeBase={config.homeBase} />}
+        {activeTab === 'routes' && (
+          <>
+            <RouteResults routes={routes} homeBase={config.homeBase} pricePerKm={config.pricePerKm} />
+            {aiPaginationMeta?.nextPagePrompt && (
+              <div style={{ textAlign: 'center', padding: '16px', borderTop: '1px solid #e0e0e0' }}>
+                <div style={{ marginBottom: '8px', fontSize: '0.9em', color: '#666' }}>
+                  Показано {routes.length} з {aiPaginationMeta.totalRoutesFound} маршрутів
+                </div>
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  style={{
+                    padding: '10px 24px',
+                    fontSize: '1em',
+                    backgroundColor: loadingMore ? '#ccc' : '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: loadingMore ? 'not-allowed' : 'pointer',
+                    transition: 'background-color 0.2s',
+                  }}
+                >
+                  {loadingMore ? '⏳ Завантаження...' : '📥 Завантажити ще'}
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </main>
     </div>
   );

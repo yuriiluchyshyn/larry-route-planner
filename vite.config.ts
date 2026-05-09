@@ -21,6 +21,31 @@ export default defineConfig({
         secure: false,
         ws: false,
       },
+      // AI API proxies (resolve CORS)
+      '/api/gemini': {
+        target: 'https://generativelanguage.googleapis.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/gemini/, ''),
+      },
+      '/api/claude': {
+        target: 'https://api.anthropic.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/claude/, ''),
+      },
+      '/api/groq': {
+        target: 'https://api.groq.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/groq/, ''),
+      },
+      '/api/openai': {
+        target: 'https://api.openai.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/openai/, ''),
+      },
     },
   },
 })

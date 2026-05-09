@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Larry Route Planner - AI Optimization Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .ai-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.9em;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 500;
+        }
+        .toggle-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        .toggle-button:hover {
+            background: #5a67d8;
+        }
+        .toggle-button.active {
+            background: #764ba2;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.internal {
+            background: #e6fffa;
+            border-left: 4px solid #38b2ac;
+        }
+        .status.ai {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚛 Larry Route Planner - AI Optimization Test</h1>
+    
+    <div class="test-section">
+        <h2>🔄 Режим оптимізації</h2>
+        <p>Тестування переключення між внутрішнім алгоритмом та AI оптимізацією:</p>
+        
+        <button class="toggle-button active" id="internalBtn" onclick="setMode('internal')">
+            🏆 Внутрішній алгоритм
+        </button>
+        <button class="toggle-button" id="aiBtn" onclick="setMode('ai')">
+            🤖 AI Оптимізація
+        </button>
+        
+        <div id="status" class="status internal">
+            <strong>Поточний режим:</strong> Внутрішній алгоритм оптимізації
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>📋 Функціональність</h2>
+        <ul>
+            <li>✅ Додано поле <code>useAIOptimization: boolean</code> в RouteConfig</li>
+            <li>✅ Створено AI оптимізатор в <code>src/utils/aiOptimizer.ts</code></li>
+            <li>✅ Додано кнопку переключення в ConfigPanel</li>
+            <li>✅ Оновлено App.tsx для використання AI або внутрішнього алгоритму</li>
+            <li>✅ Додано індикатор AI режиму в заголовок вкладки</li>
+            <li>✅ Додано стилі для AI індикатора</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>🤖 AI Оптимізація</h2>
+        <p>В AI режимі система:</p>
+        <ol>
+            <li>Формує детальний промпт з інформацією про пропозиції вантажів</li>
+            <li>Включає обмеження (EU правила, часові рамки, домашня база)</li>
+            <li>Симулює виклик AI сервісу (Claude, GPT тощо)</li>
+            <li>Парсить відповідь AI та конвертує в OptimizedRoute формат</li>
+            <li>Відображає результати з позначкою "🤖 AI"</li>
+        </ol>
+        
+        <div class="ai-indicator">
+            🤖 AI Режим активний
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>🔧 Наступні кроки для повної реалізації</h2>
+        <ol>
+            <li><strong>Інтеграція з реальним AI сервісом:</strong>
+                <ul>
+                    <li>Додати API ключі для Claude/GPT</li>
+                    <li>Реалізувати HTTP клієнт для AI API</li>
+                    <li>Обробка помилок та retry логіка</li>
+                </ul>
+            </li>
+            <li><strong>Покращення промпту:</strong>
+                <ul>
+                    <li>Більш детальна інформація про пропозиції</li>
+                    <li>Контекст про попередні маршрути</li>
+                    <li>Специфічні вимоги користувача</li>
+                </ul>
+            </li>
+            <li><strong>Парсинг AI відповіді:</strong>
+                <ul>
+                    <li>Валідація JSON відповіді</li>
+                    <li>Обробка неструктурованих відповідей</li>
+                    <li>Fallback на внутрішній алгоритм при помилках</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+
+    <script>
+        function setMode(mode) {
+            const internalBtn = document.getElementById('internalBtn');
+            const aiBtn = document.getElementById('aiBtn');
+            const status = document.getElementById('status');
+            
+            if (mode === 'internal') {
+                internalBtn.classList.add('active');
+                aiBtn.classList.remove('active');
+                status.className = 'status internal';
+                status.innerHTML = '<strong>Поточний режим:</strong> 🏆 Внутрішній алгоритм оптимізації';
+            } else {
+                aiBtn.classList.add('active');
+                internalBtn.classList.remove('active');
+                status.className = 'status ai';
+                status.innerHTML = '<strong>Поточний режим:</strong> 🤖 AI Оптимізація маршрутів';
+            }
+        }
+    </script>
+</body>
+</html>

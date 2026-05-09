@@ -155,11 +155,33 @@ function buildFilterParamMulti(
   const filter: Record<string, unknown> = {
     loading_place: loadingPlaces,
     unloading_place: unloadingPlaces,
-    load_weight: { from: config.minWeight },
-    cargo_capacity: { from: config.minCapacity },
     places_matching_type: "cross",
     exclude_suspended: true,
   };
+
+  // Add weight filter only if values are provided
+  const weightFilter: Record<string, unknown> = {};
+  if (config.minWeight !== undefined && config.minWeight > 0) {
+    weightFilter.from = config.minWeight;
+  }
+  if (config.maxWeight !== undefined && config.maxWeight > 0) {
+    weightFilter.to = config.maxWeight;
+  }
+  if (Object.keys(weightFilter).length > 0) {
+    filter.load_weight = weightFilter;
+  }
+
+  // Add capacity filter only if values are provided
+  const capacityFilter: Record<string, unknown> = {};
+  if (config.minCapacity !== undefined && config.minCapacity > 0) {
+    capacityFilter.from = config.minCapacity;
+  }
+  if (config.maxCapacity !== undefined && config.maxCapacity > 0) {
+    capacityFilter.to = config.maxCapacity;
+  }
+  if (Object.keys(capacityFilter).length > 0) {
+    filter.cargo_capacity = capacityFilter;
+  }
 
   return JSON.stringify(filter);
 }

@@ -91,6 +91,8 @@
         unloadingPoints: [],
         minWeight: null,
         maxWeight: null,
+        minCapacity: null,
+        maxCapacity: null,
         vehicleTypes: [],
         freightTypes: [],
         placesMatchingType: 'cross' // default
@@ -164,24 +166,165 @@
         }
       }
 
-      // Parse weight - try multiple selectors
+      // Parse weight - try multiple selectors with improved detection
+      console.log('Larry Extension: Starting weight parsing...');
+      
+      // Try exact selectors first
       let weightFromInput = document.querySelector('[data-ctx="load_weight.valueFrom"] input');
-      if (!weightFromInput) {
-        weightFromInput = document.querySelector('input[name*="weight"][name*="from"], input[placeholder*="weight"][placeholder*="from"]');
-      }
-      
       let weightToInput = document.querySelector('[data-ctx="load_weight.valueTo"] input');
+      
+      // Try specific IDs from your HTML
+      if (!weightFromInput) {
+        weightFromInput = document.querySelector('input[id=":r4:"]');
+      }
       if (!weightToInput) {
-        weightToInput = document.querySelector('input[name*="weight"][name*="to"], input[placeholder*="weight"][placeholder*="to"]');
+        weightToInput = document.querySelector('input[id=":r5:"]');
       }
       
-      if (weightFromInput && weightFromInput.value) {
-        filters.minWeight = parseFloat(weightFromInput.value) || null;
-        console.log('Found min weight:', filters.minWeight);
+      // Try by parentname attribute
+      if (!weightFromInput) {
+        weightFromInput = document.querySelector('input[name="valueFrom"][parentname="load_weight"]');
       }
-      if (weightToInput && weightToInput.value) {
-        filters.maxWeight = parseFloat(weightToInput.value) || null;
-        console.log('Found max weight:', filters.maxWeight);
+      if (!weightToInput) {
+        weightToInput = document.querySelector('input[name="valueTo"][parentname="load_weight"]');
+      }
+      
+      // Try by placeholder text
+      if (!weightFromInput) {
+        weightFromInput = document.querySelector('input[placeholder="З"]');
+      }
+      if (!weightToInput) {
+        weightToInput = document.querySelector('input[placeholder="До"]');
+      }
+      
+      // Also try to find weight inputs by their context in the weight section
+      if (!weightFromInput || !weightToInput) {
+        const weightSection = document.querySelector('[data-ctx="load-weight"]') || 
+                             document.querySelector('[data-ctx="rangeWeight"]') ||
+                             document.querySelector('[data-ctx="swithToWeight"]')?.closest('div');
+        if (weightSection) {
+          console.log('Larry Extension: Found weight section:', weightSection);
+          const weightInputs = weightSection.querySelectorAll('input[type="text"]');
+          console.log('Larry Extension: Weight inputs in section:', weightInputs.length, weightInputs);
+          if (weightInputs.length >= 2) {
+            weightFromInput = weightFromInput || weightInputs[0];
+            weightToInput = weightToInput || weightInputs[1];
+          }
+        }
+      }
+      
+      console.log('Larry Extension: Weight inputs found:');
+      console.log('- weightFromInput:', weightFromInput, 'value:', weightFromInput?.value, 'id:', weightFromInput?.id);
+      console.log('- weightToInput:', weightToInput, 'value:', weightToInput?.value, 'id:', weightToInput?.id);
+      
+      // Parse weight values with detailed logging
+      if (weightFromInput) {
+        const rawValue = weightFromInput.value;
+        console.log('Larry Extension: Processing minWeight - raw value:', `"${rawValue}"`);
+        if (rawValue && rawValue.trim()) {
+          const minWeightValue = parseFloat(rawValue.replace(',', '.'));
+          console.log('Larry Extension: Parsed minWeight value:', minWeightValue);
+          if (minWeightValue && minWeightValue > 0) {
+            filters.minWeight = minWeightValue;
+            console.log('Larry Extension: ✅ Set minWeight to:', filters.minWeight);
+          } else {
+            console.log('Larry Extension: ❌ minWeight value invalid or zero');
+          }
+        } else {
+          console.log('Larry Extension: ❌ minWeight field is empty, setting to 0');
+          filters.minWeight = 0;
+        }
+      } else {
+        console.log('Larry Extension: ❌ minWeight input not found, setting to 0');
+        filters.minWeight = 0;
+      }
+      
+      if (weightToInput) {
+        const rawValue = weightToInput.value;
+        console.log('Larry Extension: Processing maxWeight - raw value:', `"${rawValue}"`);
+        if (rawValue && rawValue.trim()) {
+          const maxWeightValue = parseFloat(rawValue.replace(',', '.'));
+          console.log('Larry Extension: Parsed maxWeight value:', maxWeightValue);
+          if (maxWeightValue && maxWeightValue > 0) {
+            filters.maxWeight = maxWeightValue;
+            console.log('Larry Extension: ✅ Set maxWeight to:', filters.maxWeight);
+          } else {
+            console.log('Larry Extension: ❌ maxWeight value invalid or zero');
+          }
+        } else {
+          console.log('Larry Extension: ❌ maxWeight field is empty');
+        }
+      } else {
+        console.log('Larry Extension: ❌ maxWeight input not found');
+      }
+      
+      // Debug: log all weight-related inputs found on page
+      console.log('Larry Extension: All weight-related inputs on page:');
+      const allWeightInputs = document.querySelectorAll('input[name*="weight"], input[data-ctx*="weight"], input[parentname*="weight"], input[id*=":r4:"], input[id*=":r5:"]');
+      allWeightInputs.forEach((input, index) => {
+        console.log(`  ${index + 1}. ${input.tagName} id="${input.id}" name="${input.name}" value="${input.value}" parentname="${input.getAttribute('parentname')}"`);
+      });
+
+      // Parse cargo capacity (vehicle capacity)
+      console.log('Larry Extension: Starting capacity parsing...');
+      
+      let capacityFromInput = document.querySelector('[data-ctx="cargo_capacity.valueFrom"] input');
+      let capacityToInput = document.querySelector('[data-ctx="cargo_capacity.valueTo"] input');
+      
+      // Try transport_per_order selectors (from your HTML)
+      if (!capacityFromInput) {
+        capacityFromInput = document.querySelector('[data-ctx="transport_per_order.valueFrom"] input') ||
+                           document.querySelector('input[id=":r6:"]') ||
+                           document.querySelector('input[name="valueFrom"][parentname="transport_per_order"]');
+      }
+      if (!capacityToInput) {
+        capacityToInput = document.querySelector('[data-ctx="transport_per_order.valueTo"] input') ||
+                         document.querySelector('input[id=":r7:"]') ||
+                         document.querySelector('input[name="valueTo"][parentname="transport_per_order"]');
+      }
+      
+      console.log('Larry Extension: Capacity inputs found:');
+      console.log('- capacityFromInput:', capacityFromInput, 'value:', capacityFromInput?.value, 'id:', capacityFromInput?.id);
+      console.log('- capacityToInput:', capacityToInput, 'value:', capacityToInput?.value, 'id:', capacityToInput?.id);
+      
+      if (capacityFromInput) {
+        const rawValue = capacityFromInput.value;
+        console.log('Larry Extension: Processing minCapacity - raw value:', `"${rawValue}"`);
+        if (rawValue && rawValue.trim()) {
+          const minCapacityValue = parseFloat(rawValue.replace(',', '.'));
+          console.log('Larry Extension: Parsed minCapacity value:', minCapacityValue);
+          if (minCapacityValue && minCapacityValue > 0) {
+            filters.minCapacity = minCapacityValue;
+            console.log('Larry Extension: ✅ Set minCapacity to:', filters.minCapacity);
+          } else {
+            console.log('Larry Extension: ❌ minCapacity value invalid or zero');
+          }
+        } else {
+          console.log('Larry Extension: ❌ minCapacity field is empty, setting to 0');
+          filters.minCapacity = 0;
+        }
+      } else {
+        console.log('Larry Extension: ❌ minCapacity input not found, setting to 0');
+        filters.minCapacity = 0;
+      }
+      
+      if (capacityToInput) {
+        const rawValue = capacityToInput.value;
+        console.log('Larry Extension: Processing maxCapacity - raw value:', `"${rawValue}"`);
+        if (rawValue && rawValue.trim()) {
+          const maxCapacityValue = parseFloat(rawValue.replace(',', '.'));
+          console.log('Larry Extension: Parsed maxCapacity value:', maxCapacityValue);
+          if (maxCapacityValue && maxCapacityValue > 0) {
+            filters.maxCapacity = maxCapacityValue;
+            console.log('Larry Extension: ✅ Set maxCapacity to:', filters.maxCapacity);
+          } else {
+            console.log('Larry Extension: ❌ maxCapacity value invalid or zero');
+          }
+        } else {
+          console.log('Larry Extension: ❌ maxCapacity field is empty');
+        }
+      } else {
+        console.log('Larry Extension: ❌ maxCapacity input not found');
       }
 
       // Parse freight types
@@ -218,6 +361,11 @@
       }
 
       console.log('Larry Extension: Final parsed filters:', filters);
+      
+      // Log specific weight values for debugging
+      console.log('Larry Extension: Weight debug - minWeight:', filters.minWeight, 'maxWeight:', filters.maxWeight);
+      console.log('Larry Extension: Capacity debug - minCapacity:', filters.minCapacity, 'maxCapacity:', filters.maxCapacity);
+      
       return filters;
     } catch (error) {
       console.warn('Larry Extension: Failed to parse filters from page:', error);

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Extension Weight Parsing</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-form { border: 1px solid #ccc; padding: 20px; margin: 20px 0; }
+        input { margin: 5px; padding: 5px; }
+        button { padding: 10px 20px; margin: 10px; }
+        .results { background: #f5f5f5; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Extension Weight Parsing</h1>
+    
+    <div class="test-form">
+        <h3>Симуляція форми Trans.eu з вагою 3.5т</h3>
+        
+        <!-- Loading place -->
+        <div data-ctx="place-loading_place-0">
+            <input type="text" placeholder="Знайти локалізацію" value="PL, 30-001, Kraków">
+            <input name="range" type="number" value="50">
+        </div>
+        
+        <!-- Unloading place -->
+        <div data-ctx="place-unloading_place-0">
+            <input type="text" placeholder="Знайти локалізацію" value="PL, Польща">
+        </div>
+        
+        <!-- Weight section -->
+        <div data-ctx="load-weight">
+            <div data-ctx="load_weight.valueFrom">
+                <input type="text" name="valueFrom" parentname="load_weight" placeholder="З" value="">
+            </div>
+            <div data-ctx="load_weight.valueTo">
+                <input type="text" name="valueTo" parentname="load_weight" placeholder="До" value="3.5">
+            </div>
+        </div>
+        
+        <!-- Vehicle type -->
+        <input type="checkbox" name="vehicle_size" checked> Бус
+        
+        <br><br>
+        <button onclick="testExtensionParsing()">Тестувати парсинг extension</button>
+    </div>
+    
+    <div class="results" id="results">
+        Результати з'являться тут...
+    </div>
+
+    <script>
+        function testExtensionParsing() {
+            const resultsDiv = document.getElementById('results');
+            
+            // Simulate the extension parsing function
+            try {
+                const filters = {
+                    loadingPoints: [],
+                    unloadingPoints: [],
+                    minWeight: null,
+                    maxWeight: null,
+                    minCapacity: null,
+                    maxCapacity: null,
+                    vehicleTypes: [],
+                    freightTypes: [],
+                    placesMatchingType: 'cross'
+                };
+
+                // Parse loading places
+                const loadingInputs = document.querySelectorAll('[data-ctx*="place-loading_place"] input[type="text"]');
+                console.log('Found loading inputs:', loadingInputs.length);
+                
+                // Parse weight
+                let weightFromInput = document.querySelector('[data-ctx="load_weight.valueFrom"] input');
+                let weightToInput = document.querySelector('[data-ctx="load_weight.valueTo"] input');
+                
+                console.log('weightFromInput:', weightFromInput, 'value:', weightFromInput?.value);
+                console.log('weightToInput:', weightToInput, 'value:', weightToInput?.value);
+                
+                if (weightFromInput && weightFromInput.value && weightFromInput.value.trim()) {
+                    const minWeightValue = parseFloat(weightFromInput.value.replace(',', '.')) || null;
+                    if (minWeightValue && minWeightValue > 0) {
+                        filters.minWeight = minWeightValue;
+                    }
+                }
+                
+                if (weightToInput && weightToInput.value && weightToInput.value.trim()) {
+                    const maxWeightValue = parseFloat(weightToInput.value.replace(',', '.')) || null;
+                    if (maxWeightValue && maxWeightValue > 0) {
+                        filters.maxWeight = maxWeightValue;
+                    }
+                }
+                
+                // Parse vehicle types
+                const vehicleCheckboxes = document.querySelectorAll('[name="vehicle_size"]:checked');
+                vehicleCheckboxes.forEach(checkbox => {
+                    const label = checkbox.nextElementSibling?.textContent?.trim();
+                    if (label) {
+                        filters.vehicleTypes.push(label);
+                    }
+                });
+                
+                resultsDiv.innerHTML = `
+                    <h3>Результати парсингу:</h3>
+                    <pre>${JSON.stringify(filters, null, 2)}</pre>
+                    <p><strong>Мінімальна вага:</strong> ${filters.minWeight || 'не знайдено'}</p>
+                    <p><strong>Максимальна вага:</strong> ${filters.maxWeight || 'не знайдено'}</p>
+                    <p><strong>Типи транспорту:</strong> ${filters.vehicleTypes.join(', ') || 'не знайдено'}</p>
+                `;
+                
+            } catch (error) {
+                resultsDiv.innerHTML = `<p style="color: red;">Помилка: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

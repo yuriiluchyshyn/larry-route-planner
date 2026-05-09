@@ -144,11 +144,11 @@ export interface RouteConfig {
   unloadingPoints: WayPoint[];
   // Filter params
   minWeight: number;
+  maxWeight?: number;
   minCapacity: number;
+  maxCapacity?: number;
   // Route optimization params
-  daysOnRoad: number;
   maxEmptyRunPercent: number;
-  minPricePerKm: number;
   homeBase: WayPoint; // start/end point for the lorry
   includeReturnRoute: boolean; // fetch reverse direction offers
   // Departure & return date ranges
@@ -156,6 +156,12 @@ export interface RouteConfig {
   departureTo: string;
   returnFrom: string;
   returnTo: string;
+  // AI optimization
+  useAIOptimization: boolean; // toggle between internal algorithm and AI
+  // Earnings calculation
+  pricePerKm: number; // EUR per km for earnings calculation
+  // Truck settings
+  averageSpeedKmh: number; // Average truck speed in km/h
 }
 
 // EU Driving Regulations (EC 561/2006)
@@ -204,4 +210,5 @@ export interface OptimizedRoute {
   weeklyRestsNeeded: number;
   score: number;
   euCompliant: boolean;
+  timeOverlap?: boolean; // AI detected potential time overlap between segments
 }

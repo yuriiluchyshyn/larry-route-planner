@@ -166,6 +166,7 @@ export function ConfigPanel({
     optimization: true,
     homebase: true,
     dates: true,
+    earnings: true,
   });
 
   // State for tracking auto-corrected dates
@@ -807,8 +808,33 @@ export function ConfigPanel({
               onChange={(e) =>
                 updateField('minWeight', parseInt(e.target.value) || 0)
               }
+              placeholder="0"
             />
+            <div className="help-text">Мінімальна вага вантажу</div>
           </div>
+          <div className="field">
+            <label htmlFor="maxWeight">Max Weight (t)</label>
+            <input
+              id="maxWeight"
+              type="number"
+              value={config.maxWeight || ''}
+              onChange={(e) => {
+                const value = e.target.value ? parseInt(e.target.value) : undefined;
+                if (value !== undefined) {
+                  updateField('maxWeight', value);
+                } else {
+                  // Handle undefined by creating a new config without maxWeight
+                  const newConfig = { ...config };
+                  delete newConfig.maxWeight;
+                  onChange(newConfig);
+                }
+              }}
+              placeholder="No limit"
+            />
+            <div className="help-text">Максимальна вага вантажу</div>
+          </div>
+        </div>
+        <div className="field-row">
           <div className="field">
             <label htmlFor="minCapacity">Min Capacity (t)</label>
             <input
@@ -818,7 +844,30 @@ export function ConfigPanel({
               onChange={(e) =>
                 updateField('minCapacity', parseInt(e.target.value) || 0)
               }
+              placeholder="0"
             />
+            <div className="help-text">Мінімальна вантажопідйомність транспорту</div>
+          </div>
+          <div className="field">
+            <label htmlFor="maxCapacity">Max Capacity (t)</label>
+            <input
+              id="maxCapacity"
+              type="number"
+              value={config.maxCapacity || ''}
+              onChange={(e) => {
+                const value = e.target.value ? parseInt(e.target.value) : undefined;
+                if (value !== undefined) {
+                  updateField('maxCapacity', value);
+                } else {
+                  // Handle undefined by creating a new config without maxCapacity
+                  const newConfig = { ...config };
+                  delete newConfig.maxCapacity;
+                  onChange(newConfig);
+                }
+              }}
+              placeholder="No limit"
+            />
+            <div className="help-text">Максимальна вантажопідйомність транспорту</div>
           </div>
         </div>
         </div>
@@ -832,6 +881,56 @@ export function ConfigPanel({
         </h3>
         {!collapsed.optimization && (
           <div className="section-content">
+        <div className="field checkbox-field">
+          <label htmlFor="useAIOptimization">
+            <input
+              id="useAIOptimization"
+              type="checkbox"
+              checked={config.useAIOptimization}
+              onChange={(e) =>
+                updateField('useAIOptimization', e.target.checked)
+              }
+            />
+            🤖 AI Оптимізація маршрутів
+          </label>
+          <div className="help-text">
+            {config.useAIOptimization 
+              ? "Використовується штучний інтелект для оптимізації маршрутів" 
+              : "Використовується внутрішній алгоритм оптимізації"
+            }
+          </div>
+        </div>
+        
+        {config.useAIOptimization && (
+          <div className="ai-config-section">
+            <div className="ai-status">
+              {(() => {
+                const hasGemini = typeof window !== 'undefined' && !!localStorage.getItem('GEMINI_API_KEY');
+                const hasGroq = typeof window !== 'undefined' && !!localStorage.getItem('GROQ_API_KEY');
+                const hasOpenAI = typeof window !== 'undefined' && !!localStorage.getItem('OPENAI_API_KEY');
+                const hasClaude = typeof window !== 'undefined' && !!localStorage.getItem('CLAUDE_API_KEY');
+                
+                if (hasGemini) {
+                  return <span className="status-good">🆓 Google Gemini підключено</span>;
+                } else if (hasGroq) {
+                  return <span className="status-good">🆓 Groq підключено</span>;
+                } else if (hasOpenAI) {
+                  return <span className="status-good">✅ OpenAI підключено</span>;
+                } else if (hasClaude) {
+                  return <span className="status-good">✅ Claude підключено</span>;
+                } else {
+                  return <span className="status-warning">⚠️ AI ключ не налаштовано. Додайте ключ в <code>src/config/aiConfig.ts</code></span>;
+                }
+              })()}
+            </div>
+            <div className="ai-instructions">
+              <strong>🔧 Налаштування AI:</strong> Відредагуйте файл <code>src/config/aiConfig.ts</code><br/>
+              <strong>🥇 Google Gemini (безкоштовно):</strong> <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Отримати ключ</a><br/>
+              <strong>🥈 Groq (безкоштовно):</strong> <a href="https://console.groq.com" target="_blank" rel="noopener">Отримати ключ</a>
+            </div>
+          </div>
+        )}
+        
         <div className="field checkbox-field">
           <label htmlFor="includeReturnRoute">
             <input
@@ -847,17 +946,6 @@ export function ConfigPanel({
         </div>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="daysOnRoad">Days on Road</label>
-            <input
-              id="daysOnRoad"
-              type="number"
-              value={config.daysOnRoad}
-              onChange={(e) =>
-                updateField('daysOnRoad', parseInt(e.target.value) || 1)
-              }
-            />
-          </div>
-          <div className="field">
             <label htmlFor="maxEmptyRunPercent">Max Empty (%)</label>
             <input
               id="maxEmptyRunPercent"
@@ -872,19 +960,20 @@ export function ConfigPanel({
             />
           </div>
           <div className="field">
-            <label htmlFor="minPricePerKm">Min €/km</label>
+            <label htmlFor="averageSpeedKmh">Середня швидкість (км/год)</label>
             <input
-              id="minPricePerKm"
+              id="averageSpeedKmh"
               type="number"
-              step="0.01"
-              value={config.minPricePerKm}
+              value={config.averageSpeedKmh}
               onChange={(e) =>
                 updateField(
-                  'minPricePerKm',
-                  parseFloat(e.target.value) || 0
+                  'averageSpeedKmh',
+                  parseInt(e.target.value) || 80
                 )
               }
+              placeholder="80"
             />
+            <div className="help-text">Для розрахунку часу в дорозі та EU норм</div>
           </div>
         </div>
         </div>
@@ -973,6 +1062,34 @@ export function ConfigPanel({
               }}
             />
           </div>
+        </div>
+        </div>
+        )}
+      </section>
+
+      <section className="config-section">
+        <h3 onClick={() => toggleSection('earnings')} className="collapsible-header">
+          💰 Earnings Calculation
+          <span className="collapse-icon">{collapsed.earnings ? '▶' : '▼'}</span>
+        </h3>
+        {!collapsed.earnings && (
+          <div className="section-content">
+        <div className="field">
+          <label htmlFor="pricePerKm">Price per km (EUR)</label>
+          <input
+            id="pricePerKm"
+            type="number"
+            step="0.1"
+            value={config.pricePerKm}
+            onChange={(e) =>
+              updateField(
+                'pricePerKm',
+                parseFloat(e.target.value) || 1.5
+              )
+            }
+            placeholder="1.5"
+          />
+          <div className="help-text">Used to calculate estimated earnings (loaded km × price per km)</div>
         </div>
         </div>
         )}

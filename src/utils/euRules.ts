@@ -28,8 +28,8 @@ export const AVG_LORRY_SPEED_KMH = 70;
 /**
  * Calculate how many driving hours a distance requires
  */
-export function distanceToDrivingHours(distanceKm: number): number {
-  return distanceKm / AVG_LORRY_SPEED_KMH;
+export function distanceToDrivingHours(distanceKm: number, speedKmh: number = AVG_LORRY_SPEED_KMH): number {
+  return distanceKm / speedKmh;
 }
 
 /**
@@ -114,8 +114,8 @@ export function isEUCompliant(
  * Calculate realistic travel time including mandatory breaks and rests
  * Returns total elapsed time in hours
  */
-export function calculateRealisticTravelTime(distanceKm: number): number {
-  const drivingHours = distanceToDrivingHours(distanceKm);
+export function calculateRealisticTravelTime(distanceKm: number, speedKmh: number = AVG_LORRY_SPEED_KMH): number {
+  const drivingHours = distanceToDrivingHours(distanceKm, speedKmh);
   const breaks = calculateMandatoryBreaks(drivingHours);
   const breakHours = totalBreakTimeHours(breaks);
 

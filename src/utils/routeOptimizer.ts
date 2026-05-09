@@ -101,12 +101,13 @@ function getEmptyDistance(
 function calculateIdleHours(
   prevUnloadingDate: Date,
   nextLoadingDate: Date,
-  emptyDistanceKm: number
+  emptyDistanceKm: number,
+  speedKmh: number
 ): number {
   const diffMs = nextLoadingDate.getTime() - prevUnloadingDate.getTime();
   const diffHours = diffMs / (1000 * 60 * 60);
   // Realistic travel time includes breaks and rests
-  const travelTime = calculateRealisticTravelTime(emptyDistanceKm);
+  const travelTime = calculateRealisticTravelTime(emptyDistanceKm, speedKmh);
   return Math.max(0, diffHours - travelTime);
 }
 
@@ -120,6 +121,7 @@ interface OptimizerConfig {
   departureTo: string;
   returnFrom: string;
   returnTo: string;
+  averageSpeedKmh: number;
 }
 
 /**
@@ -254,7 +256,7 @@ export function buildOptimizedRoutes(
     
     // Only consider if empty run is acceptable
     if (cycleEmptyPercent <= config.maxEmptyRunPercent) {
-      const cycleDrivingHours = distanceToDrivingHours(cycleTotalDist);
+      const cycleDrivingHours = distanceToDrivingHours(cycleTotalDist, config.averageSpeedKmh);
       const cycleDurationMs = unloadTime - loadTime + 12 * 60 * 60 * 1000; // add 12h for return
       
       // Calculate how many cycles can fit within the time window
@@ -293,7 +295,7 @@ export function buildOptimizedRoutes(
             const cycleStartTime = new Date(loadTime + c * cycleDurationMs);
             const cycleEndTime = new Date(unloadTime + c * cycleDurationMs);
             
-            const segDrivingHours = distanceToDrivingHours(cycleLoaded);
+            const segDrivingHours = distanceToDrivingHours(cycleLoaded, config.averageSpeedKmh);
             const segBreaks = calculateMandatoryBreaks(segDrivingHours);
             const pricePerKm = offer.price.value && cycleLoaded > 0 ? offer.price.value / cycleLoaded : null;
 
@@ -352,7 +354,7 @@ export function buildOptimizedRoutes(
       loadCoords[startIdx].lat,
       loadCoords[startIdx].lon
     );
-    const homeToFirstDriving = distanceToDrivingHours(homeToFirstEmpty);
+    const homeToFirstDriving = distanceToDrivingHours(homeToFirstEmpty, config.averageSpeedKmh);
 
     const stack: StackFrame[] = [
       {
@@ -362,7 +364,7 @@ export function buildOptimizedRoutes(
         currentEmpty: homeToFirstEmpty,
         currentIdle: 0,
         currentDrivingHours:
-          homeToFirstDriving + distanceToDrivingHours(distances[startIdx]),
+          homeToFirstDriving + distanceToDrivingHours(distances[startIdx], config.averageSpeedKmh),
       },
     ];
 
@@ -388,7 +390,7 @@ export function buildOptimizedRoutes(
         config.homeBaseLat,
         config.homeBaseLon
       );
-      const returnDriving = distanceToDrivingHours(returnEmpty);
+      const returnDriving = distanceToDrivingHours(returnEmpty, config.averageSpeedKmh);
       const totalEmpty = currentEmpty + returnEmpty;
       const totalDist = currentLoaded + totalEmpty;
       const emptyPercent = totalDist > 0 ? (totalEmpty / totalDist) * 100 : 0;
@@ -453,7 +455,7 @@ export function buildOptimizedRoutes(
               emptyToThis = homeToFirstEmpty;
             }
             const distKm = distances[idx];
-            const segDrivingHours = distanceToDrivingHours(distKm);
+            const segDrivingHours = distanceToDrivingHours(distKm, config.averageSpeedKmh);
             const segBreaks = calculateMandatoryBreaks(segDrivingHours);
             const pricePerKm =
               offer.price.value && distKm > 0
@@ -507,8 +509,8 @@ export function buildOptimizedRoutes(
           if (loadDates[j] > endTimeLimit) continue;
 
           const emptyToJ = emptyDistMatrix[lastIdx][j];
-          const emptyDrivingToJ = distanceToDrivingHours(emptyToJ);
-          const segDriving = distanceToDrivingHours(distances[j]);
+          const emptyDrivingToJ = distanceToDrivingHours(emptyToJ, config.averageSpeedKmh);
+          const segDriving = distanceToDrivingHours(distances[j], config.averageSpeedKmh);
           const newTotalDriving =
             currentDrivingHours + emptyDrivingToJ + segDriving;
 
@@ -532,13 +534,14 @@ export function buildOptimizedRoutes(
         for (let b = 0; b < maxBranches; b++) {
           const j = candidates[b].idx;
           const emptyToJ = emptyDistMatrix[lastIdx][j];
-          const emptyDrivingToJ = distanceToDrivingHours(emptyToJ);
-          const segDriving = distanceToDrivingHours(distances[j]);
+          const emptyDrivingToJ = distanceToDrivingHours(emptyToJ, config.averageSpeedKmh);
+          const segDriving = distanceToDrivingHours(distances[j], config.averageSpeedKmh);
 
           const idleHours = calculateIdleHours(
             new Date(unloadDates[lastIdx]),
             new Date(loadDates[j]),
-            emptyToJ
+            emptyToJ,
+            config.averageSpeedKmh
           );
 
           stack.push({

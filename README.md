@@ -49,6 +49,34 @@ Larry Route Planner is a powerful web application and browser extension that hel
    # 4. Select the "extension/" folder
    ```
 
+## 🧪 Testing Weight Filter Parsing
+
+If your extension is not correctly reading weight values from Trans.eu filters, you can test the parsing logic:
+
+1. **Open the test page:**
+   ```bash
+   # Start the development server
+   npm run dev
+   
+   # Open test page in browser
+   open http://localhost:7739/test-extension.html
+   ```
+
+2. **Test the parsing:**
+   - The test page simulates Trans.eu form structure
+   - Click "Тестувати парсинг extension" to see parsed values
+   - Check browser console for detailed debug logs
+
+3. **Expected results:**
+   - Maximum weight should be parsed as `3.5` from the form
+   - Vehicle type should show "Бус" (van)
+   - All debug information appears in console
+
+4. **Troubleshooting:**
+   - If weight is not parsed correctly, check the HTML selectors in `extension/content.js`
+   - Compare with actual Trans.eu page structure using browser DevTools
+   - Look for console errors in the extension background page
+
 2. **Use on Trans.eu:**
    - Navigate to [platform.trans.eu](https://platform.trans.eu)
    - Set up your search filters (loading/unloading cities, dates, etc.)

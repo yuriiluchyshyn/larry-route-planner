@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "proxy": "node gemini-proxy.js"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
@@ -16,6 +17,7 @@
     "http-proxy-middleware": "^2.0.6",
     "leaflet": "^1.9.4",
     "leaflet-polylinedecorator": "^1.6.0",
+    "node-fetch": "^3.3.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-leaflet": "^5.0.0"
