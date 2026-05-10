@@ -157,7 +157,8 @@ export interface RouteConfig {
   returnFrom: string;
   returnTo: string;
   // AI optimization
-  useAIOptimization: boolean; // toggle between internal algorithm and AI
+  useAIOptimization: boolean; // toggle between internal algorithm and AI (legacy)
+  routeStrategy?: string; // new strategy system: 'ai' | 'internal' | 'hybrid' | 'greedy' | 'genetic'
   // Earnings calculation
   pricePerKm: number; // EUR per km for earnings calculation
   // Truck settings

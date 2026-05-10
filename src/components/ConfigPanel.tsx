@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MapModal } from './MapModal';
 import { reverseGeocode } from '../utils/geocode';
+import { getAvailableStrategies, getStrategyInfo, RouteStrategy, legacyToStrategy, strategyToLegacy } from '../utils/routeStrategy';
 import type { RouteConfig, WayPoint } from '../types';
 
 interface ConfigPanelProps {
@@ -881,27 +882,82 @@ export function ConfigPanel({
         </h3>
         {!collapsed.optimization && (
           <div className="section-content">
-        <div className="field checkbox-field">
+        
+        {/* Route Strategy Selection */}
+        <div className="field">
+          <label htmlFor="routeStrategy">🎯 Стратегія оптимізації</label>
+          <select
+            id="routeStrategy"
+            value={config.routeStrategy || legacyToStrategy(config.useAIOptimization)}
+            onChange={(e) => {
+              const newStrategy = e.target.value as RouteStrategy;
+              updateField('routeStrategy', newStrategy);
+              // Update legacy field for backward compatibility
+              updateField('useAIOptimization', strategyToLegacy(newStrategy));
+            }}
+          >
+            {getAvailableStrategies().map((strategy) => (
+              <option key={strategy.id} value={strategy.id}>
+                {strategy.icon} {strategy.name}
+              </option>
+            ))}
+          </select>
+          
+          {(() => {
+            const currentStrategy = config.routeStrategy || legacyToStrategy(config.useAIOptimization);
+            const strategyInfo = getStrategyInfo(currentStrategy as RouteStrategy);
+            
+            if (!strategyInfo) return null;
+            
+            return (
+              <div className="strategy-info">
+                <div className="help-text">{strategyInfo.description}</div>
+                
+                <div className="strategy-details">
+                  <div className="pros-cons">
+                    <div className="pros">
+                      <strong>✅ Переваги:</strong>
+                      <ul>
+                        {strategyInfo.pros.map((pro, idx) => (
+                          <li key={idx}>{pro}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="cons">
+                      <strong>❌ Недоліки:</strong>
+                      <ul>
+                        {strategyInfo.cons.map((con, idx) => (
+                          <li key={idx}>{con}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+        
+        {/* Legacy checkbox for backward compatibility */}
+        <div className="field checkbox-field" style={{ display: 'none' }}>
           <label htmlFor="useAIOptimization">
             <input
               id="useAIOptimization"
               type="checkbox"
               checked={config.useAIOptimization}
-              onChange={(e) =>
-                updateField('useAIOptimization', e.target.checked)
-              }
+              onChange={(e) => {
+                updateField('useAIOptimization', e.target.checked);
+                // Update new strategy field
+                updateField('routeStrategy', legacyToStrategy(e.target.checked));
+              }}
             />
-            🤖 AI Оптимізація маршрутів
+            🤖 AI Оптимізація маршрутів (Legacy)
           </label>
-          <div className="help-text">
-            {config.useAIOptimization 
-              ? "Використовується штучний інтелект для оптимізації маршрутів" 
-              : "Використовується внутрішній алгоритм оптимізації"
-            }
-          </div>
         </div>
         
-        {config.useAIOptimization && (
+        {/* AI Configuration Section */}
+        {(config.routeStrategy === RouteStrategy.AI_OPTIMIZATION || 
+          (!config.routeStrategy && config.useAIOptimization)) && (
           <div className="ai-config-section">
             <div className="ai-status">
               {(() => {

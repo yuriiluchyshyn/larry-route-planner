@@ -4,8 +4,8 @@ import { EURulesHeader } from './components/EURulesHeader';
 import { OffersTable } from './components/OffersTable';
 import { RouteResults } from './components/RouteResults';
 import { fetchFreightOffers } from './utils/apiClient';
-import { buildOptimizedRoutes } from './utils/routeOptimizer';
-import { buildAIOptimizedRoutes, getLastAIPaginationMetadata, loadNextAIPage } from './utils/aiOptimizer';
+import { executeRouteOptimization, legacyToStrategy, RouteStrategy } from './utils/routeStrategy';
+import { getLastAIPaginationMetadata, loadNextAIPage } from './utils/aiOptimizer';
 import type { FreightOffer, OptimizedRoute, RouteConfig } from './types';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -143,7 +143,8 @@ const defaultConfig: RouteConfig = {
   departureTo: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
   returnFrom: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
   returnTo: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-  useAIOptimization: false, // Default to internal algorithm
+  useAIOptimization: false, // Default to internal algorithm (legacy)
+  routeStrategy: RouteStrategy.AI_OPTIMIZATION, // Default to AI optimization (new system)
   pricePerKm: 1.5, // Default 1.5 EUR per km
   averageSpeedKmh: 80, // Default 80 km/h average speed
 };
@@ -364,43 +365,19 @@ function App() {
       // Pass main + return separately so optimizer can build round-trip cycles
       let optimized: OptimizedRoute[];
       
-      if (config.useAIOptimization) {
-        console.log('🤖 Larry: Using AI optimization');
-        setAiStatus('🤖 AI аналізує пропозиції...');
-        
-        try {
-          optimized = await buildAIOptimizedRoutes(
-            { mainOffers: mainArr, returnOffers: returnArr },
-            {
-              maxEmptyRunPercent: config.maxEmptyRunPercent,
-              homeBaseLat: homeBase.latitude,
-              homeBaseLon: homeBase.longitude,
-              departureFrom: config.departureFrom,
-              departureTo: config.departureTo,
-              returnFrom: config.returnFrom,
-              returnTo: config.returnTo,
-              averageSpeedKmh: config.averageSpeedKmh,
-            },
-            setAiStatus // Pass status callback
-          );
-          setAiStatus('✅ AI оптимізація завершена');
-          setAiPaginationMeta(getLastAIPaginationMetadata());
-          setTimeout(() => setAiStatus(null), 3000);
-        } catch (aiError) {
-          console.error('AI optimization failed:', aiError);
-          setAiStatus(`❌ AI оптимізація не вдалася: ${aiError instanceof Error ? aiError.message : 'Невідома помилка'}`);
-          setAiPaginationMeta(null);
-          optimized = []; // No fallback — show empty results
-          setTimeout(() => setAiStatus(null), 5000);
-        }
-      } else {
-        console.log('🏆 Larry: Using internal algorithm optimization');
-        optimized = buildOptimizedRoutes(
+      // Determine strategy (support both legacy and new system)
+      const strategy = config.routeStrategy 
+        ? config.routeStrategy as RouteStrategy
+        : legacyToStrategy(config.useAIOptimization);
+      
+      console.log(`🎯 Strategy: Using ${strategy} optimization`);
+      
+      try {
+        optimized = await executeRouteOptimization(
           { mainOffers: mainArr, returnOffers: returnArr },
           {
-            daysOnRoad: 7, // Default to 7 days
+            strategy,
             maxEmptyRunPercent: config.maxEmptyRunPercent,
-            minPricePerKm: 0, // Default to no minimum price filtering
             homeBaseLat: homeBase.latitude,
             homeBaseLon: homeBase.longitude,
             departureFrom: config.departureFrom,
@@ -408,8 +385,25 @@ function App() {
             returnFrom: config.returnFrom,
             returnTo: config.returnTo,
             averageSpeedKmh: config.averageSpeedKmh,
+            daysOnRoad: 7,
+            minPricePerKm: 0,
+            aiStatusCallback: setAiStatus,
           }
         );
+        
+        if (strategy === RouteStrategy.AI_OPTIMIZATION) {
+          setAiPaginationMeta(getLastAIPaginationMetadata());
+          setTimeout(() => setAiStatus(null), 3000);
+        }
+        
+      } catch (error) {
+        console.error('Route optimization failed:', error);
+        if (strategy === RouteStrategy.AI_OPTIMIZATION) {
+          setAiStatus(`❌ Оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
+          setAiPaginationMeta(null);
+          setTimeout(() => setAiStatus(null), 5000);
+        }
+        optimized = []; // Show empty results on error
       }
       console.log(`${config.useAIOptimization ? '🤖 AI' : '🏆 Internal'}: Got ${optimized.length} optimized routes`);
       setRoutes(optimized);
@@ -435,7 +429,15 @@ function App() {
 
     setOptimizing(true);
     setError(null);
-    setAiStatus(config.useAIOptimization ? '🤖 AI аналізує пропозиції...' : null);
+    
+    // Determine strategy (support both legacy and new system)
+    const strategy = config.routeStrategy 
+      ? config.routeStrategy as RouteStrategy
+      : legacyToStrategy(config.useAIOptimization);
+    
+    if (strategy === RouteStrategy.AI_OPTIMIZATION) {
+      setAiStatus('🤖 AI аналізує пропозиції...');
+    }
 
     try {
       const home = config.homeBase;
@@ -446,40 +448,12 @@ function App() {
 
       let optimized: OptimizedRoute[];
 
-      if (config.useAIOptimization) {
-        try {
-          optimized = await buildAIOptimizedRoutes(
-            { mainOffers, returnOffers },
-            {
-              maxEmptyRunPercent: config.maxEmptyRunPercent,
-              homeBaseLat: homeBase.latitude,
-              homeBaseLon: homeBase.longitude,
-              departureFrom: config.departureFrom,
-              departureTo: config.departureTo,
-              returnFrom: config.returnFrom,
-              returnTo: config.returnTo,
-              averageSpeedKmh: config.averageSpeedKmh,
-            },
-            setAiStatus // Pass status callback
-          );
-          console.log(`🤖 AI returned ${optimized.length} routes:`, optimized);
-          setAiStatus('✅ AI оптимізація завершена');
-          setAiPaginationMeta(getLastAIPaginationMetadata());
-          setTimeout(() => setAiStatus(null), 3000);
-        } catch (aiError) {
-          console.error('AI optimization failed:', aiError);
-          setAiStatus(`❌ AI оптимізація не вдалася: ${aiError instanceof Error ? aiError.message : 'Невідома помилка'}`);
-          setAiPaginationMeta(null);
-          optimized = []; // No fallback — show empty results
-          setTimeout(() => setAiStatus(null), 5000);
-        }
-      } else {
-        optimized = buildOptimizedRoutes(
+      try {
+        optimized = await executeRouteOptimization(
           { mainOffers, returnOffers },
           {
-            daysOnRoad: 7,
+            strategy,
             maxEmptyRunPercent: config.maxEmptyRunPercent,
-            minPricePerKm: 0,
             homeBaseLat: homeBase.latitude,
             homeBaseLon: homeBase.longitude,
             departureFrom: config.departureFrom,
@@ -487,11 +461,31 @@ function App() {
             returnFrom: config.returnFrom,
             returnTo: config.returnTo,
             averageSpeedKmh: config.averageSpeedKmh,
+            daysOnRoad: 7,
+            minPricePerKm: 0,
+            aiStatusCallback: setAiStatus,
           }
         );
+        
+        console.log(`🎯 Strategy: ${strategy} returned ${optimized.length} routes:`, optimized);
+        
+        if (strategy === RouteStrategy.AI_OPTIMIZATION) {
+          setAiStatus('✅ AI оптимізація завершена');
+          setAiPaginationMeta(getLastAIPaginationMetadata());
+          setTimeout(() => setAiStatus(null), 3000);
+        }
+        
+      } catch (error) {
+        console.error('Route optimization failed:', error);
+        if (strategy === RouteStrategy.AI_OPTIMIZATION) {
+          setAiStatus(`❌ Оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
+          setAiPaginationMeta(null);
+          setTimeout(() => setAiStatus(null), 5000);
+        }
+        optimized = []; // Show empty results on error
       }
 
-      console.log(`${config.useAIOptimization ? '🤖 AI' : '🏆 Internal'}: Re-optimized ${optimized.length} routes`);
+      console.log(`🎯 Strategy: Re-optimized ${optimized.length} routes using ${strategy}`);
       console.log('Setting routes to state:', optimized);
       setRoutes(optimized);
     } catch (err) {
@@ -610,10 +604,18 @@ function App() {
             className={`tab ${activeTab === 'routes' ? 'active' : ''}`}
             onClick={() => setActiveTab('routes')}
           >
-            {config.useAIOptimization 
-              ? `🤖 AI Оптимізовані (${routes.length}/${aiPaginationMeta?.totalRoutesFound || routes.length})`
-              : `🏆 Оптимізовані пропозиції (${routes.length})`
-            }
+            {(() => {
+              const strategy = config.routeStrategy 
+                ? config.routeStrategy as RouteStrategy
+                : legacyToStrategy(config.useAIOptimization);
+              
+              const strategyIcon = strategy === RouteStrategy.AI_OPTIMIZATION ? '🤖' : '🏆';
+              const strategyName = strategy === RouteStrategy.AI_OPTIMIZATION ? 'AI Оптимізовані' : 'Оптимізовані пропозиції';
+              
+              return strategy === RouteStrategy.AI_OPTIMIZATION
+                ? `${strategyIcon} ${strategyName} (${routes.length}/${aiPaginationMeta?.totalRoutesFound || routes.length})`
+                : `${strategyIcon} ${strategyName} (${routes.length})`;
+            })()}
             {(mainOffers.length > 0 || returnOffers.length > 0) && (
               <span
                 className={`tab-refresh-inline ${optimizing ? 'spinning' : ''}`}
