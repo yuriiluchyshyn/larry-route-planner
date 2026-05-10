@@ -144,7 +144,7 @@ const defaultConfig: RouteConfig = {
   returnFrom: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
   returnTo: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
   useAIOptimization: false, // Default to internal algorithm (legacy)
-  routeStrategy: RouteStrategy.AI_OPTIMIZATION, // Default to AI optimization (new system)
+  routeStrategy: RouteStrategy.DFS_BRANCH_BOUND, // Default to DFS optimization (new system)
   pricePerKm: 1.5, // Default 1.5 EUR per km
   averageSpeedKmh: 80, // Default 80 km/h average speed
 };

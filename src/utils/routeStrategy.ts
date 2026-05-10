@@ -8,11 +8,13 @@
 import type { FreightOffer, OptimizedRoute } from '../types';
 import { buildOptimizedRoutes } from './routeOptimizer';
 import { buildAIOptimizedRoutes } from './aiOptimizer';
+import { buildDFSOptimizedRoutes } from './strategies/dfs';
 
 // Available optimization strategies
 export enum RouteStrategy {
   INTERNAL_ALGORITHM = 'internal',
   AI_OPTIMIZATION = 'ai',
+  DFS_BRANCH_BOUND = 'dfs', // New DFS strategy
   HYBRID = 'hybrid', // Future: combine both approaches
   GREEDY = 'greedy', // Future: simple greedy algorithm
   GENETIC = 'genetic', // Future: genetic algorithm
@@ -82,6 +84,26 @@ export const AVAILABLE_STRATEGIES: StrategyInfo[] = [
       'Залежить від інтернет з\'єднання'
     ],
     recommended: true,
+    available: true,
+  },
+  {
+    id: RouteStrategy.DFS_BRANCH_BOUND,
+    name: 'DFS Branch & Bound',
+    description: 'Детермінований алгоритм пошуку в глибину з відсіканням гілок',
+    icon: '🔍',
+    pros: [
+      'Дуже швидкий (мілісекунди)',
+      'Детермінований результат',
+      'Не потребує API ключів',
+      'Працює офлайн',
+      'Оптимальне відсікання неперспективних варіантів'
+    ],
+    cons: [
+      'Обмежена складність комбінацій',
+      'Може пропустити креативні рішення',
+      'Залежить від якості евристик'
+    ],
+    recommended: false,
     available: true,
   },
   {
@@ -177,6 +199,9 @@ export async function executeRouteOptimization(
     case RouteStrategy.INTERNAL_ALGORITHM:
       return executeInternalStrategy(offers, config);
       
+    case RouteStrategy.DFS_BRANCH_BOUND:
+      return await executeDFSStrategy(offers, config);
+      
     case RouteStrategy.HYBRID:
       return await executeHybridStrategy(offers, config);
       
@@ -231,6 +256,52 @@ async function executeAIStrategy(
     
     if (config.aiStatusCallback) {
       config.aiStatusCallback(`❌ AI оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
+    }
+    
+    throw error;
+  }
+}
+
+/**
+ * Execute DFS Branch & Bound strategy
+ */
+async function executeDFSStrategy(
+  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
+  config: StrategyConfig
+): Promise<OptimizedRoute[]> {
+  
+  if (config.aiStatusCallback) {
+    config.aiStatusCallback('🔍 DFS аналізує пропозиції...');
+  }
+  
+  try {
+    const result = await buildDFSOptimizedRoutes(
+      offers,
+      {
+        homeBaseLat: config.homeBaseLat,
+        homeBaseLon: config.homeBaseLon,
+        maxEmptyRunPercent: config.maxEmptyRunPercent,
+        averageSpeedKmh: config.averageSpeedKmh,
+        departureFrom: config.departureFrom,
+        departureTo: config.departureTo,
+        returnFrom: config.returnFrom,
+        returnTo: config.returnTo,
+        daysOnRoad: config.daysOnRoad || 7,
+      },
+      config.aiStatusCallback
+    );
+    
+    if (config.aiStatusCallback) {
+      config.aiStatusCallback('✅ DFS оптимізація завершена');
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error('🔍 DFS: Strategy execution failed:', error);
+    
+    if (config.aiStatusCallback) {
+      config.aiStatusCallback(`❌ DFS оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
     }
     
     throw error;
