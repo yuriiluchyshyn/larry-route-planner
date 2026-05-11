@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { OptimizedRoute, RouteSegment, WayPoint } from '../types';
 import { RouteMapModal } from './RouteMapModal';
+import { TranseuRouteInfo } from './TranseuRouteInfo';
 import { EU_DRIVING_RULES } from '../utils/euRules';
 
 interface RouteResultsProps {
@@ -46,17 +47,31 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
   const [mapRouteIdx, setMapRouteIdx] = useState<number | null>(null);
   const [euDetailIdx, setEuDetailIdx] = useState<number | null>(null);
   const [hideEuWarnings, setHideEuWarnings] = useState(false);
+  const [sortBy, setSortBy] = useState<'score' | 'earnings' | 'empty' | 'loaded'>('score');
 
   if (routes.length === 0) {
     return null;
   }
 
-  // Sort routes: most loaded km first, then least empty km
+  // Sort routes based on selected criteria
   const sortedRoutes = [...routes].sort((a, b) => {
-    if (b.loadedDistanceKm !== a.loadedDistanceKm) {
-      return b.loadedDistanceKm - a.loadedDistanceKm;
+    switch (sortBy) {
+      case 'earnings':
+        const earningsA = a.loadedDistanceKm * pricePerKm;
+        const earningsB = b.loadedDistanceKm * pricePerKm;
+        return earningsB - earningsA; // Higher earnings first
+      case 'empty':
+        return a.emptyRunPercent - b.emptyRunPercent; // Lower empty % first
+      case 'loaded':
+        return b.loadedDistanceKm - a.loadedDistanceKm; // More loaded km first
+      case 'score':
+      default:
+        // Original sorting: most loaded km first, then least empty km
+        if (b.loadedDistanceKm !== a.loadedDistanceKm) {
+          return b.loadedDistanceKm - a.loadedDistanceKm;
+        }
+        return a.emptyDistanceKm - b.emptyDistanceKm;
     }
-    return a.emptyDistanceKm - b.emptyDistanceKm;
   });
 
   // Filter EU warnings if checkbox is checked
@@ -146,6 +161,21 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
           />
           Сховати маршрути з EU Warning ({routes.length - routes.filter(r => r.euCompliant).length} шт)
         </label>
+        
+        <div className="sort-controls">
+          <label htmlFor="sortBy">Сортувати за:</label>
+          <select
+            id="sortBy"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'score' | 'earnings' | 'empty' | 'loaded')}
+            style={{ marginLeft: '8px', padding: '4px 8px' }}
+          >
+            <option value="score">📊 Score (за замовчуванням)</option>
+            <option value="earnings">💰 Earnings (прибуток)</option>
+            <option value="empty">🚫 Empty (менше порожніх км)</option>
+            <option value="loaded">📦 Loaded (більше завантажених км)</option>
+          </select>
+        </div>
       </div>
 
       {filteredRoutes.map((route, routeIdx) => (
@@ -174,6 +204,16 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
                   title="Час завантаження/розвантаження може накладатися — потрібно узгодити з перевізником"
                 >
                   ⏰ Час гнучкий
+                </span>
+              )}
+              {/* Check for time overlap */}
+              {route.timeOverlap && (
+                <span 
+                  className="eu-badge" 
+                  style={{ background: '#f6e05e', color: '#744210' }}
+                  title="Час завантаження/розвантаження гнучкий в межах робочого дня (07:00-22:00) — можна домовитись з клієнтом"
+                >
+                  🟡 Час гнучкий
                 </span>
               )}
               {/* Check if this is a cyclic route (same offer repeated) */}
@@ -291,7 +331,6 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
           <table className="segments-table">
             <thead>
               <tr>
-                <th>Day</th>
                 <th>Loading</th>
                 <th>#</th>
                 <th>Route</th>
@@ -306,18 +345,19 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
             </thead>
             <tbody>
               {route.segments.map((seg, segIdx) => {
-                const day = getDayOfWeek(seg.loadingDate);
+                const loadingDay = getDayOfWeek(seg.loadingDate);
+                const unloadingDay = getDayOfWeek(seg.unloadingDate);
                 return (
                   <tr key={segIdx}>
                     <td>
                       <span
                         className="day-badge"
-                        style={{ background: day.color }}
+                        style={{ background: loadingDay.color, marginRight: '8px' }}
                       >
-                        {day.name}
+                        {loadingDay.name}
                       </span>
+                      {formatDate(seg.loadingDate)}
                     </td>
-                    <td>{formatDate(seg.loadingDate)}</td>
                     <td>{segIdx + 1}</td>
                     <td>{seg.from} → {seg.to}</td>
                     <td>{seg.distanceKm.toFixed(0)} km</td>
@@ -329,7 +369,15 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
                       {seg.emptyDistanceKm.toFixed(0)} km
                     </td>
                     <td>{seg.restStops}</td>
-                    <td>{formatDate(seg.unloadingDate)}</td>
+                    <td>
+                      <span
+                        className="day-badge"
+                        style={{ background: unloadingDay.color, marginRight: '8px' }}
+                      >
+                        {unloadingDay.name}
+                      </span>
+                      {formatDate(seg.unloadingDate)}
+                    </td>
                     <td>
                       <small>{seg.offer.company.legal_name}</small>
                     </td>
@@ -338,6 +386,9 @@ export function RouteResults({ routes, homeBase, pricePerKm }: RouteResultsProps
               })}
             </tbody>
           </table>
+          
+          {/* Add Trans.eu route information */}
+          <TranseuRouteInfo route={route} />
         </div>
       ))}
 

@@ -1,324 +1,262 @@
-# 🚛 Larry Route Planner
+# Larry Route Planner 🚛
 
-**Intelligent freight route optimization tool for Trans.eu platform**
+Інтелектуальний планувальник маршрутів для європейських вантажних перевезень з інтеграцією Trans.eu API.
 
-Larry Route Planner is a powerful web application and browser extension that helps logistics professionals optimize freight routes, reduce empty runs, and maximize profitability using real-time data from the Trans.eu freight exchange platform.
+## 🌟 Основні можливості
 
-![Larry Route Planner Screenshot](https://via.placeholder.com/800x400/4a9eff/ffffff?text=Larry+Route+Planner)
+- **🚛 Trans.eu інтеграція** - Точні розрахунки маршрутів з реальними витратами
+- **💰 Розрахунок платних доріг** - Точні витрати на автобани та платні дороги
+- **⛽ Споживання палива** - Реальні дані споживання та витрат на паливо
+- **🌱 Екологічність** - Розрахунок викидів CO₂ за стандартом ISO 14083:2023
+- **🤖 AI оптимізація** - Штучний інтелект для пошуку найкращих маршрутів
+- **📊 EU правила** - Автоматична перевірка відповідності європейським правилам водіння
+- **📈 Аналітика** - Детальна аналітика маршрутів та витрат
 
-## ✨ Features
+## 🚀 Швидкий старт
 
-### 🎯 **Smart Route Optimization**
-- **Multi-stop route planning** - Combine multiple freight offers into efficient routes
-- **Empty run minimization** - Reduce deadhead miles between loads
-- **EU driving regulations compliance** - Automatic rest stops and daily driving limits
-- **Home base optimization** - Routes start and end at your depot location
+### Встановлення
 
-### 📊 **Advanced Analytics**
-- **Interactive route visualization** on OpenStreetMap
-- **Profitability scoring** based on loaded km vs empty runs
-- **Time and distance calculations** with realistic driving hours
-- **Price per kilometer analysis** for better decision making
+```bash
+# Клонування репозиторію
+git clone <repository-url>
+cd larry-route-planner
 
-### 🔗 **Trans.eu Integration**
-- **Browser extension** for seamless platform integration
-- **Automatic data extraction** from Trans.eu search results
-- **One-click offer selection** directly from the platform
-- **Real-time token synchronization** for API access
+# Встановлення залежностей
+npm install
 
-### 🌍 **European Coverage**
-- Support for **25+ European countries**
-- **Geocoding integration** for accurate coordinates
-- **Multi-language city names** (English, German, Polish, Ukrainian)
-- **Postal code validation** and auto-completion
+# Запуск в режимі розробки
+npm run dev
+```
 
-## 🚀 Quick Start
+### Конфігурація
 
-### Option 1: Browser Extension (Recommended)
+1. **Trans.eu API** - Найточніші дані для Європи (рекомендовано)
+2. **AI оптимізація** - Потребує API ключ (опціонально)
 
-1. **Install the extension:**
-   ```bash
-   # Clone the repository
-   git clone https://github.com/yuriiluchyshyn/larry-route-planner.git
-   cd larry-route-planner
-   
-   # Load extension in Chrome
-   # 1. Open chrome://extensions/
-   # 2. Enable "Developer mode"
-   # 3. Click "Load unpacked"
-   # 4. Select the "extension/" folder
-   ```
+## 🛠️ Стратегії оптимізації
 
-## 🧪 Testing Weight Filter Parsing
+### 1. Trans.eu Маршрутизація 🚛 (Рекомендовано)
 
-If your extension is not correctly reading weight values from Trans.eu filters, you can test the parsing logic:
-
-1. **Open the test page:**
-   ```bash
-   # Start the development server
-   npm run dev
-   
-   # Open test page in browser
-   open http://localhost:7739/test-extension.html
-   ```
-
-2. **Test the parsing:**
-   - The test page simulates Trans.eu form structure
-   - Click "Тестувати парсинг extension" to see parsed values
-   - Check browser console for detailed debug logs
-
-3. **Expected results:**
-   - Maximum weight should be parsed as `3.5` from the form
-   - Vehicle type should show "Бус" (van)
-   - All debug information appears in console
-
-4. **Troubleshooting:**
-   - If weight is not parsed correctly, check the HTML selectors in `extension/content.js`
-   - Compare with actual Trans.eu page structure using browser DevTools
-   - Look for console errors in the extension background page
-
-2. **Use on Trans.eu:**
-   - Navigate to [platform.trans.eu](https://platform.trans.eu)
-   - Set up your search filters (loading/unloading cities, dates, etc.)
-   - Click the floating 🚛 button in the bottom-right corner
-   - Larry will automatically import your filters and bearer token
-
-### Option 2: Standalone Web App
-
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Start development server:**
-   ```bash
-   npm run dev
-   ```
-
-3. **Configure API access:**
-   - Get your bearer token from Trans.eu (see setup guide below)
-   - Add loading and unloading points
-   - Set your home base location
-   - Click "Fetch Offers" to start optimization
-
-## 🔧 Setup Guide
-
-### Getting Trans.eu Bearer Token
-
-1. **Login to Trans.eu:**
-   - Go to [platform.trans.eu](https://platform.trans.eu)
-   - Login with your account
-
-2. **Extract bearer token:**
-   - Open Developer Tools (F12)
-   - Go to Network tab
-   - Perform any search on the platform
-   - Find a request to `api-platform.trans.eu`
-   - Copy the `Authorization: Bearer` token from request headers
-
-3. **Add token to Larry:**
-   - Paste the token in the "API Connection" section
-   - The token will be automatically saved and reused
-
-### Configuring Route Parameters
+Використовує офіційний Trans.eu API для найточніших розрахунків:
 
 ```typescript
-// Example configuration
-{
-  "homeBase": {
-    "locality": "Kraków",
-    "country": "47_poland",
-    "latitude": 50.0647,
-    "longitude": 19.9450
-  },
-  "loadingPoints": [
-    {
-      "locality": "Berlin",
-      "country": "21_germany",
-      "range": 50
-    }
-  ],
-  "unloadingPoints": [
-    {
-      "locality": "Paris", 
-      "country": "33_france",
-      "range": 100
-    }
-  ],
-  "minWeight": 1,
-  "maxDailyDriving": 9,
-  "daysOnRoad": 5
+import { RouteStrategy } from './utils/routeStrategy';
+
+const routes = await executeRouteOptimization(offers, {
+  strategy: RouteStrategy.TRANSEU_ROUTING,
+  vehicleType: 'truck', // або 'van'
+  maxEmptyRunPercent: 30,
+  homeBaseLat: 50.0619474,
+  homeBaseLon: 19.9368564,
+});
+```
+
+**Переваги:**
+- ✅ Найточніші дані маршрутизації для Європи
+- ✅ Реальні витрати на платні дороги
+- ✅ Точний розрахунок палива та викидів CO₂
+- ✅ Враховує обмеження для вантажівок
+- ✅ Фільтрує маршрути за відсотком холостого ходу
+
+### 2. AI Оптимізація 🤖
+
+Використовує штучний інтелект для складних оптимізацій:
+
+```typescript
+const routes = await executeRouteOptimization(offers, {
+  strategy: RouteStrategy.AI_OPTIMIZATION,
+  // ... параметри
+});
+```
+
+## 📊 Приклад використання
+
+```typescript
+import { 
+  calculateAccurateDistance, 
+  optimizeRouteOrder 
+} from './utils/transeuRouteClient';
+
+// Розрахунок маршруту між містами
+const result = await calculateAccurateDistance(
+  { lat: 50.0619474, lon: 19.9368564 }, // Краків
+  { lat: 52.5170365, lon: 13.3888599 }, // Берлін
+  'truck'
+);
+
+console.log(`Відстань: ${result.distanceKm} км`);
+console.log(`Час: ${result.timeHours} год`);
+console.log(`Платні дороги: €${result.tollEur}`);
+console.log(`Паливо: ${result.fuelConsumption} л`);
+console.log(`CO₂: ${result.co2Emissions} кг`);
+
+// Оптимізація порядку міст
+const cities = [
+  { lat: 50.0619474, lon: 19.9368564, id: 'krakow' },
+  { lat: 52.5170365, lon: 13.3888599, id: 'berlin' },
+  { lat: 48.2083537, lon: 16.3725042, id: 'vienna' }
+];
+
+const optimization = await optimizeRouteOrder(cities, 'truck');
+console.log('Оптимальний порядок:', optimization.optimizedOrder);
+```
+
+## 🚛 Підтримувані транспортні засоби
+
+### Вантажівка (40т)
+- Максимальна вага: 40,000 кг
+- Споживання палива: 35 л/100км
+- Стандарт викидів: EURO 6
+- Кількість осей: 5
+
+### Фургон (3.5т)
+- Максимальна вага: 3,500 кг
+- Споживання палива: 12 л/100км
+- Стандарт викидів: EURO 6
+- Кількість осей: 2
+
+## 🌍 Підтримувані країни
+
+- 🇵🇱 Польща
+- 🇩🇪 Німеччина
+- 🇫🇷 Франція
+- 🇨🇿 Чехія
+- 🇦🇹 Австрія
+- 🇸🇰 Словаччина
+- 🇭🇺 Угорщина
+- 🇮🇹 Італія
+- 🇪🇸 Іспанія
+- 🇳🇱 Нідерланди
+- 🇧🇪 Бельгія
+- І багато інших європейських країн
+
+## 📋 EU правила водіння
+
+Автоматична перевірка відповідності:
+
+- ⏰ Максимум 9 годин водіння на день
+- 🛑 Обов'язкова перерва 45 хвилин після 4.5 годин
+- 📅 Максимум 56 годин водіння на тиждень
+- 🏠 Щотижневий відпочинок 45 годин
+
+## 🔧 Налаштування
+
+### Environment Variables
+
+```bash
+# Trans.eu API (не потрібен API ключ)
+VITE_TRANSEU_API_URL=https://dc1.api-platform.trans.eu/app/stored-routes/api/v1
+
+# AI оптимізація (опціонально)
+VITE_AI_API_KEY=your-ai-api-key
+```
+
+### Конфігурація маршрутизації
+
+```typescript
+interface RouteConfig {
+  maxEmptyRunPercent: number; // Максимальний відсоток холостого ходу
+  homeBaseLat: number;        // Широта домашньої бази
+  homeBaseLon: number;        // Довгота домашньої бази
+  departureDate: string;      // Дата відправлення
+  returnDate: string;         // Дата повернення
+  averageSpeedKmh: number;    // Середня швидкість
+  vehicleType: 'truck' | 'van'; // Тип транспорту
 }
 ```
 
-## 🏗️ Architecture
+## 📈 Метрики та аналітика
 
-### Frontend (React + TypeScript)
-- **React 18** with TypeScript for type safety
-- **Leaflet maps** for interactive route visualization
-- **Modular component architecture** for maintainability
-- **CSS Grid/Flexbox** for responsive design
+### Основні метрики
+- 📏 Загальна відстань (км)
+- 🚛 Відстань з вантажем (км)
+- 🔄 Відстань холостого ходу (км)
+- ⏱️ Загальний час подорожі
+- 💰 Витрати на платні дороги (EUR)
+- ⛽ Споживання палива (л)
+- 🌱 Викиди CO₂ (кг)
 
-### Browser Extension
-- **Manifest V3** for modern Chrome extension standards
-- **Content scripts** for Trans.eu platform integration
-- **Background service worker** for token management
-- **Cross-frame messaging** for seamless data exchange
+### EU відповідність
+- ✅ Відповідність правилам водіння
+- 🛑 Кількість обов'язкових перерв
+- 📅 Потреба в щотижневому відпочинку
+- ⚠️ Попередження про порушення
 
-### API Integration
-- **Trans.eu REST API** with full pagination support
-- **Nominatim geocoding** for address resolution
-- **CORS handling** for cross-origin requests
-- **Rate limiting** and error recovery
-
-### Route Optimization Engine
-```typescript
-// Core optimization strategies
-1. Single offer cycles (Home → Load → Unload → Home)
-2. Multi-offer routes (Home → Load1 → Unload1 → Load2 → Unload2 → Home)
-3. EU regulation compliance (max 9h/day, 4.5h continuous)
-4. Empty run minimization algorithms
-5. Profitability scoring (loaded km / total km ratio)
-```
-
-## 📁 Project Structure
+## 🗂️ Структура проекту
 
 ```
 larry-route-planner/
-├── src/                          # React application source
-│   ├── components/               # React components
-│   │   ├── ConfigPanel.tsx      # Configuration interface
-│   │   ├── OffersTable.tsx      # Freight offers display
-│   │   ├── RouteResults.tsx     # Optimized routes
-│   │   └── RouteMapModal.tsx    # Interactive map
-│   ├── utils/                   # Utility functions
-│   │   ├── apiClient.ts         # Trans.eu API integration
-│   │   ├── routeOptimizer.ts    # Route optimization logic
-│   │   └── geocode.ts           # Address geocoding
-│   └── types.ts                 # TypeScript definitions
-├── extension/                   # Browser extension
-│   ├── manifest.json           # Extension configuration
-│   ├── content.js              # Trans.eu integration
-│   ├── content.css             # Extension styling
-│   └── background.js           # Service worker
-├── public/                     # Static assets
-└── docs/                      # Documentation
+├── src/
+│   ├── components/          # React компоненти
+│   │   ├── RouteResults.tsx # Відображення результатів
+│   │   ├── TranseuRouteInfo.tsx # Trans.eu інформація
+│   │   └── ...
+│   ├── utils/              # Утиліти та API клієнти
+│   │   ├── transeuRouteClient.ts # Trans.eu API клієнт
+│   │   ├── routeOptimizer.ts     # Оптимізатори маршрутів
+│   │   ├── routeStrategy.ts      # Стратегії оптимізації
+│   │   └── ...
+│   ├── types.ts            # TypeScript типи
+│   └── App.tsx             # Головний компонент
+├── examples/               # Приклади використання
+│   └── transeu-example.ts  # Trans.eu API приклади
+├── TRANSEU_INTEGRATION.md  # Документація інтеграції
+└── README.md              # Цей файл
 ```
 
-## 🔍 Key Algorithms
+## 🧪 Тестування
 
-### Route Optimization
-Larry uses a multi-strategy approach to find optimal routes:
-
-1. **Greedy Single Cycles**: Fast calculation of simple round trips
-2. **Dynamic Programming**: Multi-stop route optimization with memoization
-3. **Constraint Satisfaction**: EU driving regulations compliance
-4. **Heuristic Scoring**: Weighted scoring based on multiple factors
-
-### Scoring Formula
-```typescript
-score = (loadedKm * 2) - (emptyKm * 0.5) - (idleHours * 10) + euCompliantBonus
-```
-
-### Distance Calculation
-- **Haversine formula** for great-circle distances
-- **Realistic driving time** estimates (avg 60 km/h)
-- **Rest stop calculations** per EU regulations
-
-## 🌐 Supported Countries
-
-| Country | Code | Cities Supported |
-|---------|------|------------------|
-| 🇩🇪 Germany | `21_germany` | 50+ major cities |
-| 🇵🇱 Poland | `47_poland` | 30+ major cities |
-| 🇫🇷 France | `33_france` | 25+ major cities |
-| 🇨🇿 Czech Republic | `42_czech_republic` | 15+ major cities |
-| 🇦🇹 Austria | `43_austria` | 10+ major cities |
-| 🇳🇱 Netherlands | `31_netherlands` | 15+ major cities |
-| 🇧🇪 Belgium | `32_belgium` | 10+ major cities |
-| ... | ... | 25+ countries total |
-
-## 🛠️ Development
-
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- Chrome browser (for extension development)
-
-### Local Development
 ```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Run tests
+# Запуск тестів
 npm test
 
-# Lint code
-npm run lint
+# Тестування Trans.eu API
+npm run test:transeu
+
+# Приклади використання
+npm run examples
 ```
 
-### Extension Development
-```bash
-# Build extension
-npm run build:extension
+## 📚 Документація
 
-# Load in Chrome
-# 1. Go to chrome://extensions/
-# 2. Enable Developer mode
-# 3. Click "Load unpacked"
-# 4. Select dist/extension folder
-```
+- [Trans.eu Integration](./TRANSEU_INTEGRATION.md) - Детальна документація інтеграції
+- [Examples](./examples/) - Приклади використання API
+- [API Reference](./docs/api.md) - Довідник API (якщо існує)
 
-## 📊 Performance
+## 🤝 Внесок у розробку
 
-- **API Response Time**: ~2-3 seconds for 400+ offers
-- **Route Optimization**: <1 second for 20 routes
-- **Memory Usage**: ~50MB for large datasets
-- **Extension Overhead**: <5MB memory footprint
+1. Fork репозиторію
+2. Створіть feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit зміни (`git commit -m 'Add amazing feature'`)
+4. Push до branch (`git push origin feature/amazing-feature`)
+5. Відкрийте Pull Request
 
-## 🔒 Security & Privacy
+## 📄 Ліцензія
 
-- **No data storage** - All data processed locally
-- **Bearer token encryption** - Tokens stored securely in browser
-- **CORS compliance** - Proper cross-origin handling
-- **No tracking** - Zero analytics or user tracking
+Цей проект ліцензований під [MIT License](./LICENSE).
 
-## 🤝 Contributing
+## 🆘 Підтримка
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+Якщо у вас виникли питання або проблеми:
 
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Перевірте [документацію](./TRANSEU_INTEGRATION.md)
+2. Подивіться [приклади](./examples/)
+3. Створіть Issue в GitHub
 
-## 📄 License
+## 🔄 Changelog
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### v2.0.0 - Trans.eu Integration
+- ✨ Додано Trans.eu API інтеграцію
+- 💰 Розрахунок платних доріг
+- ⛽ Споживання палива та викиди CO₂
+- 🚛 Підтримка різних типів транспорту
+- 📊 Розширена аналітика маршрутів
 
-## 🆘 Support
-
-- **Documentation**: [Full setup guide](SETUP.md)
-- **Issues**: [GitHub Issues](https://github.com/yuriiluchyshyn/larry-route-planner/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yuriiluchyshyn/larry-route-planner/discussions)
-
-## 🙏 Acknowledgments
-
-- **Trans.eu** for providing the freight exchange platform and API
-- **OpenStreetMap** for mapping data and Nominatim geocoding
-- **Leaflet** for the interactive mapping library
-- **React community** for the excellent ecosystem
+### v1.0.0 - Initial Release
+- 🤖 AI оптимізація маршрутів
+- 📋 EU правила водіння
+- 📈 Базова аналітика
 
 ---
 
-**Made with ❤️ for the logistics community**
-
-*Larry Route Planner - Making freight logistics smarter, one route at a time.*
+**Larry Route Planner** - Ваш надійний помічник у плануванні європейських вантажних перевезень! 🚛✨

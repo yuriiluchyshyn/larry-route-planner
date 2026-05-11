@@ -147,15 +147,17 @@ export interface RouteConfig {
   maxWeight?: number;
   minCapacity: number;
   maxCapacity?: number;
+  // Vehicle and matching params from extension
+  vehicleTypes: string[]; // типи транспорту з чекбоксів (з напівпричепом, Вантажівка(3.5т - 12т), Бус, з причепом)
+  placesMatchingType: 'cross' | 'pairs'; // тип співставлення місць (cross/pairs)
   // Route optimization params
   maxEmptyRunPercent: number;
+  maxResults?: number; // Maximum number of routes to return (optional - no limit if not specified)
   homeBase: WayPoint; // start/end point for the lorry
   includeReturnRoute: boolean; // fetch reverse direction offers
-  // Departure & return date ranges
-  departureFrom: string; // ISO date string (YYYY-MM-DD)
-  departureTo: string;
-  returnFrom: string;
-  returnTo: string;
+  // Departure & return dates
+  departureDate: string; // ISO date string (YYYY-MM-DD)
+  returnDate: string; // ISO date string (YYYY-MM-DD)
   // AI optimization
   useAIOptimization: boolean; // toggle between internal algorithm and AI (legacy)
   routeStrategy?: string; // new strategy system: 'ai' | 'internal' | 'hybrid' | 'greedy' | 'genetic'
@@ -195,6 +197,10 @@ export interface RouteSegment {
   emptyDistanceKm: number;
   drivingHours: number; // estimated driving hours for this segment
   restStops: number; // number of mandatory breaks needed
+  // Trans.eu specific fields
+  tollEur?: number; // toll costs in EUR
+  fuelConsumption?: number; // fuel consumption in liters
+  co2Emissions?: number; // CO2 emissions in kg
 }
 
 export interface OptimizedRoute {
@@ -212,4 +218,8 @@ export interface OptimizedRoute {
   score: number;
   euCompliant: boolean;
   timeOverlap?: boolean; // AI detected potential time overlap between segments
+  // Trans.eu specific totals
+  totalTollEur?: number; // total toll costs in EUR
+  totalFuelConsumption?: number; // total fuel consumption in liters
+  totalCo2Emissions?: number; // total CO2 emissions in kg
 }

@@ -46,7 +46,7 @@ export function OffersTable({ offers, onRowClick }: OffersTableProps) {
 
   return (
     <div className="table-container">
-      <h3>📦 Available Freight Offers ({offers.length})</h3>
+      <h3>📦 Available Freight Offers ({offers.length}) - Всі результати завантажені</h3>
       <table className="offers-table">
         <thead>
           <tr>

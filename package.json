@@ -8,7 +8,24 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "proxy": "node gemini-proxy.js"
+    "proxy": "node gemini-proxy.js",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "progress-server": "cd server && npm install && npm start",
+    "start-with-progress": "concurrently \"npm run dev\" \"npm run progress-server\"",
+    "start:proxy": "./start-proxy-only.sh",
+    "start:full": "./run.sh",
+    "proxy:health": "curl -s http://localhost:7740/health | jq .",
+    "proxy:status": "curl -s http://localhost:7740/status | jq .",
+    "proxy:test": "curl -s http://localhost:7740/test-transeu | jq .",
+    "diagnose": "./diagnose-403.sh",
+    "set-token": "./set-jwt-token.sh",
+    "redis:inspect": "node inspect-redis.cjs",
+    "redis:stats": "node inspect-redis.cjs stats",
+    "redis:clear": "node inspect-redis.cjs clear",
+    "redis:search": "node inspect-redis.cjs search",
+    "test:parallel": "node test-parallel-loading.cjs"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
@@ -29,12 +46,15 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/ui": "^4.1.5",
+    "concurrently": "^8.2.2",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }

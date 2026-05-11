@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { MapModal } from './MapModal';
 import { reverseGeocode } from '../utils/geocode';
 import { getAvailableStrategies, getStrategyInfo, RouteStrategy, legacyToStrategy, strategyToLegacy } from '../utils/routeStrategy';
+import { isInExtensionContext } from '../services/extensionService';
 import type { RouteConfig, WayPoint } from '../types';
 
 interface ConfigPanelProps {
-  config: RouteConfig;
+  config: RouteConfig | null;
   onChange: (config: RouteConfig) => void;
   onFetch: () => void;
   loading: boolean;
@@ -36,6 +37,36 @@ function loadConfig(): Partial<RouteConfig> | null {
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
+}
+
+// Функція для отримання читабельної назви країни
+function getCountryDisplayName(countryCode: string): string {
+  const countryMap: { [key: string]: string } = {
+    '47_poland': 'Poland',
+    '21_germany': 'Germany',
+    '33_france': 'France',
+    '42_czech_republic': 'Czech Republic',
+    '43_austria': 'Austria',
+    '421_slovakia': 'Slovakia',
+    '36_hungary': 'Hungary',
+    '39_italy': 'Italy',
+    '34_spain': 'Spain',
+    '31_netherlands': 'Netherlands',
+    '32_belgium': 'Belgium',
+    'PL': 'Poland',
+    'DE': 'Germany',
+    'FR': 'France',
+    'CZ': 'Czech Republic',
+    'AT': 'Austria',
+    'SK': 'Slovakia',
+    'HU': 'Hungary',
+    'IT': 'Italy',
+    'ES': 'Spain',
+    'NL': 'Netherlands',
+    'BE': 'Belgium'
+  };
+  
+  return countryMap[countryCode] || countryCode;
 }
 
 function WayPointEditor({
@@ -151,6 +182,33 @@ export function ConfigPanel({
   onFetch,
   loading,
 }: ConfigPanelProps) {
+  // Якщо конфігурації немає, показуємо повідомлення
+  if (!config) {
+    return (
+      <div className="config-panel">
+        <div style={{ 
+          padding: '20px', 
+          textAlign: 'center', 
+          color: '#666',
+          border: '2px dashed #ddd',
+          borderRadius: '8px',
+          margin: '20px'
+        }}>
+          <h3>⚡ Ініціалізація Larry Route Planner</h3>
+          <p>🔄 Автоматичне завантаження конфігурації та токену з Chrome Extension...</p>
+          <div style={{ marginTop: '16px', fontSize: '0.9em' }}>
+            <p><strong>💡 Переконайтеся що:</strong></p>
+            <ul style={{ textAlign: 'left', display: 'inline-block' }}>
+              <li>Ви відкрили Larry через Chrome Extension на platform.trans.eu</li>
+              <li>Ви увійшли в свій акаунт на platform.trans.eu</li>
+              <li>Extension має доступ до токену автентифікації</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const [mapModal, setMapModal] = useState<{
     type: 'loading' | 'unloading' | 'home';
     index: number | null; // null = adding new point
@@ -170,11 +228,7 @@ export function ConfigPanel({
     earnings: true,
   });
 
-  // State for tracking auto-corrected dates
-  const [autoCorrections, setAutoCorrections] = useState<{
-    departureTo?: boolean;
-    returnTo?: boolean;
-  }>({});
+  // State for tracking auto-corrected dates - removed since we no longer use date ranges
 
   // Load saved config on mount
   useEffect(() => {
@@ -197,81 +251,8 @@ export function ConfigPanel({
     field: keyof RouteConfig,
     value: string | number | boolean
   ) => {
-    // Save bearerToken to localStorage when it changes
-    if (field === 'bearerToken' && typeof value === 'string') {
-      try {
-        if (value.trim()) {
-          localStorage.setItem('transFrameToken', value);
-        } else {
-          localStorage.removeItem('transFrameToken');
-        }
-      } catch (error) {
-        console.warn('Failed to save transFrameToken to localStorage:', error);
-      }
-    }
-    
-    let newConfig = { ...config, [field]: value };
-    let newCorrections = { ...autoCorrections };
-    
-    // Auto-validate date ranges
-    if (field === 'departureFrom' || field === 'departureTo') {
-      const depFrom = field === 'departureFrom' ? value as string : config.departureFrom;
-      const depTo = field === 'departureTo' ? value as string : config.departureTo;
-      
-      // If departure from is later than departure to, adjust departure to
-      if (depFrom && depTo && depFrom > depTo) {
-        newConfig.departureTo = depFrom;
-        newCorrections.departureTo = true;
-        console.log('Larry: Auto-adjusted Departure To to match Departure From:', depFrom);
-        
-        // Clear the correction indicator after 3 seconds
-        setTimeout(() => {
-          setAutoCorrections(prev => ({ ...prev, departureTo: false }));
-        }, 3000);
-      } else {
-        newCorrections.departureTo = false;
-      }
-      
-      // Also check if return dates need adjustment when departure changes
-      if (field === 'departureFrom') {
-        const retFrom = config.returnFrom;
-        if (retFrom && depFrom && retFrom < depFrom) {
-          newConfig.returnFrom = depFrom;
-          console.log('Larry: Auto-adjusted Return From to not be earlier than Departure From:', depFrom);
-        }
-      }
-    }
-    
-    if (field === 'returnFrom' || field === 'returnTo') {
-      const retFrom = field === 'returnFrom' ? value as string : config.returnFrom;
-      const retTo = field === 'returnTo' ? value as string : config.returnTo;
-      
-      // If return from is later than return to, adjust return to
-      if (retFrom && retTo && retFrom > retTo) {
-        newConfig.returnTo = retFrom;
-        newCorrections.returnTo = true;
-        console.log('Larry: Auto-adjusted Return To to match Return From:', retFrom);
-        
-        // Clear the correction indicator after 3 seconds
-        setTimeout(() => {
-          setAutoCorrections(prev => ({ ...prev, returnTo: false }));
-        }, 3000);
-      } else {
-        newCorrections.returnTo = false;
-      }
-      
-      // Ensure return from is not earlier than departure from
-      if (field === 'returnFrom') {
-        const depFrom = config.departureFrom;
-        if (depFrom && retFrom && retFrom < depFrom) {
-          newConfig.returnFrom = depFrom;
-          console.log('Larry: Auto-adjusted Return From to not be earlier than Departure From:', depFrom);
-        }
-      }
-    }
-    
-    setAutoCorrections(newCorrections);
-    onChange(newConfig);
+    // Note: bearerToken is now managed automatically by extension, no manual editing
+    onChange({ ...config, [field]: value });
   };
 
   const addLoadingPoint = () => {
@@ -457,7 +438,7 @@ export function ConfigPanel({
 
       <section className="config-section">
         <h3 onClick={() => toggleSection('api')} className="collapsible-header">
-          API Connection
+          🔐 Authentication & API
           <span className="collapse-icon">{collapsed.api ? '▶' : '▼'}</span>
         </h3>
         {!collapsed.api && (
@@ -472,143 +453,144 @@ export function ConfigPanel({
             placeholder="/api/trans/app/exchange/api/rest/v2/freight-offers"
           />
         </div>
+        {/* Token Status Display - No Manual Input */}
         <div className="field">
-          <label htmlFor="bearerToken">
-            Bearer Token
-            {config.bearerToken && (
-              <span style={{ 
-                fontSize: '0.75rem', 
-                color: '#666', 
-                marginLeft: '8px',
-                fontWeight: 'normal'
-              }}>
-                {window.parent !== window 
-                  ? '(з platform.trans.eu через extension)' 
-                  : '(з localStorage)'
-                }
-              </span>
-            )}
-          </label>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              id="bearerToken"
-              type="password"
-              value={config.bearerToken}
-              onChange={(e) => updateField('bearerToken', e.target.value)}
-              placeholder={window.parent !== window 
-                ? "Автозавантаження з platform.trans.eu..." 
-                : "Your API token (автозавантаження з localStorage)"
-              }
-              style={{
-                flex: 1,
-                borderColor: config.bearerToken && /[^\x00-\xFF]/.test(config.bearerToken) ? '#ff4444' : undefined
-              }}
-            />
-            {!config.bearerToken && window.parent !== window && (
-              <button
-                type="button"
-                onClick={() => {
-                  console.log('Larry: Manually requesting token from extension...');
-                  window.parent.postMessage({ type: 'REQUEST_TOKEN' }, '*');
-                }}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  border: '1px solid #4a90e2',
-                  borderRadius: '4px',
-                  background: '#4a90e2',
-                  color: 'white',
-                  cursor: 'pointer'
-                }}
-                title="Запросити токен з platform.trans.eu"
-              >
-                🔄 Запросити токен
-              </button>
-            )}
-            {window.parent !== window && (
-              <button
-                type="button"
-                onClick={() => {
-                  console.log('Larry: Requesting filters from extension...');
-                  window.parent.postMessage({ type: 'REQUEST_FILTERS' }, '*');
-                }}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  border: '1px solid #28a745',
-                  borderRadius: '4px',
-                  background: '#28a745',
-                  color: 'white',
-                  cursor: 'pointer',
-                  marginLeft: '4px'
-                }}
-                title="Оновити фільтри з platform.trans.eu"
-              >
-                📥 Оновити фільтри
-              </button>
-            )}
-            {config.bearerToken && (
-              <button
-                type="button"
-                onClick={() => updateField('bearerToken', '')}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  background: '#f8f9fa',
-                  cursor: 'pointer',
-                  color: '#666'
-                }}
-                title="Очистити токен"
-              >
-                🗑️ Очистити
-              </button>
-            )}
-            {config.bearerToken && /[^\x00-\xFF]/.test(config.bearerToken) && (
-              <button
-                type="button"
-                onClick={() => updateField('bearerToken', config.bearerToken.replace(/[^\x00-\xFF]/g, '').trim())}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-                title="Clean invalid characters from token"
-              >
-                Clean
-              </button>
-            )}
+          <label>🔐 Authentication Status</label>
+          <div style={{ 
+            padding: '12px', 
+            borderRadius: '6px', 
+            backgroundColor: config.bearerToken ? '#e8f5e8' : '#fff3cd',
+            border: `1px solid ${config.bearerToken ? '#28a745' : '#ffc107'}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <div>
+              {config.bearerToken ? (
+                <span style={{ color: '#155724', fontWeight: '500' }}>
+                  ✅ Токен автоматично завантажено з Chrome Extension
+                </span>
+              ) : (
+                <span style={{ color: '#856404', fontWeight: '500' }}>
+                  ⏳ Очікування токену з Chrome Extension...
+                </span>
+              )}
+              {config.bearerToken && (
+                <div style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}>
+                  Токен: {config.bearerToken.substring(0, 20)}...
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {!config.bearerToken && isInExtensionContext() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log('Larry: Manually requesting token from extension...');
+                    window.parent.postMessage({ type: 'REQUEST_TOKEN' }, '*');
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    border: '1px solid #4a90e2',
+                    borderRadius: '4px',
+                    background: '#4a90e2',
+                    color: 'white',
+                    cursor: 'pointer'
+                  }}
+                  title="Запросити токен з platform.trans.eu"
+                >
+                  🔄 Запросити токен
+                </button>
+              )}
+              {isInExtensionContext() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log('Larry: Requesting filters from extension...');
+                    window.parent.postMessage({ type: 'REQUEST_FILTERS' }, '*');
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    border: '1px solid #28a745',
+                    borderRadius: '4px',
+                    background: '#28a745',
+                    color: 'white',
+                    cursor: 'pointer'
+                  }}
+                  title="Оновити фільтри з platform.trans.eu"
+                >
+                  📥 Оновити фільтри
+                </button>
+              )}
+            </div>
           </div>
-          {config.bearerToken && /[^\x00-\xFF]/.test(config.bearerToken) && (
-            <div className="error-text" style={{ color: '#ff4444', fontSize: '12px', marginTop: '4px' }}>
-              ⚠️ Token contains invalid characters. Click "Clean" to remove them automatically.
+          {!isInExtensionContext() && (
+            <div className="help-text" style={{ marginTop: '8px', padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+              <strong>💡 Як використовувати:</strong><br/>
+              1. Встановіть Chrome Extension для Larry Route Planner<br/>
+              2. Відкрийте <a href="https://platform.trans.eu" target="_blank" rel="noopener">platform.trans.eu</a><br/>
+              3. Увійдіть в свій акаунт<br/>
+              4. Натисніть на іконку Larry Extension (🚛) на сторінці<br/>
+              5. Токен буде автоматично завантажено
             </div>
           )}
-          <div className="help-text">
-            <strong>How to get Bearer Token:</strong><br/>
-            1. Open <a href="https://platform.trans.eu" target="_blank" rel="noopener">platform.trans.eu</a><br/>
-            2. Login to your account<br/>
-            3. Open Browser Dev Tools (F12)<br/>
-            4. Go to Network tab<br/>
-            5. Make any search on the platform<br/>
-            6. Find API request to api-platform.trans.eu<br/>
-            7. Copy "Authorization: Bearer xxx" token<br/>
-            8. Paste the token (without "Bearer ") here<br/><br/>
-            <strong>⚠️ CORS Issue Solutions:</strong><br/>
-            • <strong>Option 1:</strong> Use Chrome Extension on platform.trans.eu (recommended)<br/>
-            • <strong>Option 2:</strong> Run proxy server: <code>node proxy-server.js</code> in project folder<br/>
-            • <strong>Option 3:</strong> Use direct API URL with valid token
-          </div>
         </div>
         </div>
         )}
       </section>
 
+      {/* Інформація про Extension контекст */}
+      {isInExtensionContext() && (
+        <section className="config-section">
+          <div className="extension-info">
+            <h3>📍 Loading & Unloading Points</h3>
+            <div className="help-text">
+              <strong>Extension Mode:</strong> Loading and unloading points are automatically extracted from the Trans.eu platform.
+              <br/>
+              <strong>Current Points:</strong>
+              {config?.loadingPoints?.length > 0 && (
+                <div style={{ marginTop: '8px' }}>
+                  <strong>Loading:</strong> {config.loadingPoints.map(p => {
+                    // Якщо locality порожній, але є country - показуємо країну
+                    const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
+                    const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
+                    return `${displayName} (${postalInfo}) - ${p.range || 50}km`;
+                  }).join(', ')}
+                </div>
+              )}
+              {config?.unloadingPoints?.length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                  <strong>Unloading:</strong> {config.unloadingPoints.map(p => {
+                    // Якщо locality порожній, але є country - показуємо країну
+                    const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
+                    const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
+                    return `${displayName} (${postalInfo}) - ${p.range || 50}km`;
+                  }).join(', ')}
+                </div>
+              )}
+              {(!config?.loadingPoints?.length && !config?.unloadingPoints?.length) && (
+                <div style={{ marginTop: '8px', color: '#ff6b6b' }}>
+                  ⚠️ No points detected. Make sure you have selected locations on the Trans.eu platform.
+                </div>
+              )}
+              <div style={{ marginTop: '12px' }}>
+                <button 
+                  className="add-btn"
+                  onClick={() => window.location.reload()}
+                  title="Refresh data from Extension"
+                >
+                  🔄 Refresh from Extension
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Loading Points - приховано в Extension контексті */}
+      {!isInExtensionContext() && (
       <section className="config-section">
         <h3 onClick={() => toggleSection('loading')} className="collapsible-header">
           📍 Loading Points (Pickup Locations)
@@ -655,7 +637,10 @@ export function ConfigPanel({
         </div>
         )}
       </section>
+      )}
 
+      {/* Unloading Points - приховано в Extension контексті */}
+      {!isInExtensionContext() && (
       <section className="config-section">
         <h3 onClick={() => toggleSection('unloading')} className="collapsible-header">
           📍 Unloading Points (Delivery Locations)
@@ -702,6 +687,7 @@ export function ConfigPanel({
         </div>
         )}
       </section>
+      )}
 
       <section className="config-section">
         <h3 onClick={() => toggleSection('homebase')} className="collapsible-header">
@@ -956,7 +942,7 @@ export function ConfigPanel({
         </div>
         
         {/* AI Configuration Section */}
-        {(config.routeStrategy === RouteStrategy.AI_OPTIMIZATION || 
+        {(config.routeStrategy === RouteStrategy.NEW_STRATEGY || 
           (!config.routeStrategy && config.useAIOptimization)) && (
           <div className="ai-config-section">
             <div className="ai-status">
@@ -1015,6 +1001,9 @@ export function ConfigPanel({
               }
             />
           </div>
+          {/* Поле maxResults приховано - виводимо всі маршрути без обмежень */}
+        </div>
+        <div className="field-row">
           <div className="field">
             <label htmlFor="averageSpeedKmh">Середня швидкість (км/год)</label>
             <input
@@ -1038,84 +1027,30 @@ export function ConfigPanel({
 
       <section className="config-section">
         <h3 onClick={() => toggleSection('dates')} className="collapsible-header">
-          📅 Departure & Return
+          📅 Departure & Return Dates
           <span className="collapse-icon">{collapsed.dates ? '▶' : '▼'}</span>
         </h3>
         {!collapsed.dates && (
           <div className="section-content">
         <div className="field-row">
           <div className="field">
-            <label htmlFor="departureFrom">Departure from</label>
+            <label htmlFor="departureDate">Departure Date</label>
             <input
-              id="departureFrom"
+              id="departureDate"
               type="date"
-              value={config.departureFrom}
-              onChange={(e) => updateField('departureFrom', e.target.value)}
-              title="Дата початку періоду відправлення. Якщо буде пізніше ніж 'Departure to', то 'Departure to' автоматично зміниться"
+              value={config.departureDate}
+              onChange={(e) => updateField('departureDate', e.target.value)}
+              title="Дата відправлення"
             />
           </div>
           <div className="field">
-            <label htmlFor="departureTo">
-              Departure to
-              {autoCorrections.departureTo && (
-                <span style={{ 
-                  color: '#f39c12', 
-                  fontSize: '0.7rem', 
-                  marginLeft: '4px',
-                  fontWeight: 'normal'
-                }}>
-                  (автоматично скориговано)
-                </span>
-              )}
-            </label>
+            <label htmlFor="returnDate">Return Date</label>
             <input
-              id="departureTo"
+              id="returnDate"
               type="date"
-              value={config.departureTo}
-              onChange={(e) => updateField('departureTo', e.target.value)}
-              title="Дата кінця періоду відправлення. Автоматично коригується якщо менша за 'Departure from'"
-              style={{
-                borderColor: autoCorrections.departureTo ? '#f39c12' : undefined,
-                boxShadow: autoCorrections.departureTo ? '0 0 0 2px rgba(243, 156, 18, 0.2)' : undefined
-              }}
-            />
-          </div>
-        </div>
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="returnFrom">Return from</label>
-            <input
-              id="returnFrom"
-              type="date"
-              value={config.returnFrom}
-              onChange={(e) => updateField('returnFrom', e.target.value)}
-              title="Дата початку періоду повернення. Якщо буде пізніше ніж 'Return to', то 'Return to' автоматично зміниться"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="returnTo">
-              Return to
-              {autoCorrections.returnTo && (
-                <span style={{ 
-                  color: '#f39c12', 
-                  fontSize: '0.7rem', 
-                  marginLeft: '4px',
-                  fontWeight: 'normal'
-                }}>
-                  (автоматично скориговано)
-                </span>
-              )}
-            </label>
-            <input
-              id="returnTo"
-              type="date"
-              value={config.returnTo}
-              onChange={(e) => updateField('returnTo', e.target.value)}
-              title="Дата кінця періоду повернення. Автоматично коригується якщо менша за 'Return from'"
-              style={{
-                borderColor: autoCorrections.returnTo ? '#f39c12' : undefined,
-                boxShadow: autoCorrections.returnTo ? '0 0 0 2px rgba(243, 156, 18, 0.2)' : undefined
-              }}
+              value={config.returnDate}
+              onChange={(e) => updateField('returnDate', e.target.value)}
+              title="Дата повернення"
             />
           </div>
         </div>
@@ -1151,8 +1086,14 @@ export function ConfigPanel({
         )}
       </section>
 
-      <button className="fetch-btn" onClick={onFetch} disabled={loading}>
-        {loading ? '⏳ Loading...' : '🔍 Fetch & Optimize Routes'}
+      <button 
+        className="fetch-btn" 
+        onClick={onFetch} 
+        disabled={loading || !config.loadingPoints?.length || !config.unloadingPoints?.length}
+      >
+        {loading ? '⏳ Loading...' : 
+         !config.loadingPoints?.length || !config.unloadingPoints?.length ? '⚠️ Додайте точки завантаження та розвантаження' :
+         '🔍 Fetch & Optimize Routes'}
       </button>
 
       {mapModal && (

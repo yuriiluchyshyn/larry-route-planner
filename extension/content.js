@@ -7,7 +7,7 @@
 
   // URL of your running Larry Route Planner app
   // Change this if your dev server runs on a different port
-  const APP_URL = 'http://localhost:7739';
+  const APP_URL = 'http://localhost:7740';
 
   let panel = null;
   let toggleBtn = null;
@@ -74,12 +74,114 @@
 
   function getTokenFromStorage() {
     try {
-      // Get token from platform.trans.eu localStorage
-      const token = localStorage.getItem('transFrameToken');
-      console.log('Larry Extension: Found token in localStorage:', token ? 'Yes' : 'No');
-      return token || '';
+      console.log('Larry Extension: Searching for authentication tokens...');
+      
+      // Спочатку перевіримо всі ключі в localStorage
+      const allKeys = Object.keys(localStorage);
+      console.log('Larry Extension: All localStorage keys:', allKeys);
+      
+      // Пріоритетні ключі для токенів (на основі скріншота)
+      const priorityKeys = [
+        'transFrameTokenExpireAt', // Основний токен з терміном дії
+        'transFrameToken',         // Запасний токен
+        'authToken',
+        'accessToken',
+        'jwt',
+        'token'
+      ];
+      
+      // Спочатку перевіряємо пріоритетні ключі
+      for (const key of priorityKeys) {
+        const value = localStorage.getItem(key);
+        if (value) {
+          console.log(`Larry Extension: Found priority token "${key}":`, value.substring(0, 30) + '...');
+          
+          // Перевіряємо чи це JWT токен
+          const isJWT = value.includes('.') && value.split('.').length === 3;
+          console.log(`Larry Extension: "${key}" is JWT format:`, isJWT);
+          
+          if (isJWT) {
+            try {
+              const payload = JSON.parse(atob(value.split('.')[1]));
+              console.log(`Larry Extension: "${key}" JWT payload:`, {
+                exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'no expiry',
+                iss: payload.iss || 'no issuer',
+                aud: payload.aud || 'no audience',
+                sub: payload.sub || 'no subject'
+              });
+              
+              // Якщо це валідний JWT з exp, перевіряємо чи не прострочений
+              if (payload.exp) {
+                const isExpired = Date.now() > (payload.exp * 1000);
+                console.log(`Larry Extension: "${key}" is expired:`, isExpired);
+                if (!isExpired) {
+                  console.log(`Larry Extension: Using valid JWT token from "${key}"`);
+                  return value;
+                }
+              } else {
+                // Якщо немає exp, використовуємо токен
+                console.log(`Larry Extension: Using JWT token without expiry from "${key}"`);
+                return value;
+              }
+            } catch (e) {
+              console.warn(`Larry Extension: Could not decode JWT "${key}":`, e);
+              // Якщо не можемо декодувати, але це схоже на токен, все одно використовуємо
+              if (value.length > 50) {
+                console.log(`Larry Extension: Using non-JWT token from "${key}"`);
+                return value;
+              }
+            }
+          } else if (value.length > 20) {
+            // Якщо не JWT, але довгий рядок - можливо це токен
+            console.log(`Larry Extension: Using non-JWT token from "${key}"`);
+            return value;
+          }
+        }
+      }
+      
+      // Шукаємо токени за різними ключами (всі що містять token/auth)
+      const tokenKeys = allKeys.filter(key => 
+        key.toLowerCase().includes('token') || 
+        key.toLowerCase().includes('auth') || 
+        key.toLowerCase().includes('jwt') ||
+        key.toLowerCase().includes('bearer') ||
+        key.toLowerCase().includes('access')
+      );
+      
+      console.log('Larry Extension: All potential token keys:', tokenKeys);
+      
+      // Перевіряємо решту токенів
+      for (const key of tokenKeys) {
+        if (priorityKeys.includes(key)) continue; // Вже перевірили
+        
+        const value = localStorage.getItem(key);
+        if (value && value.length > 20) {
+          console.log(`Larry Extension: Found fallback token "${key}":`, value.substring(0, 30) + '...');
+          return value;
+        }
+      }
+      
+      // Також перевіримо sessionStorage
+      console.log('Larry Extension: Checking sessionStorage...');
+      if (typeof sessionStorage !== 'undefined') {
+        const sessionKeys = Object.keys(sessionStorage);
+        console.log('Larry Extension: SessionStorage keys:', sessionKeys);
+        
+        for (const key of sessionKeys) {
+          if (key.toLowerCase().includes('token') || key.toLowerCase().includes('auth')) {
+            const value = sessionStorage.getItem(key);
+            if (value && value.length > 20) {
+              console.log(`Larry Extension: Found token in sessionStorage "${key}":`, value.substring(0, 30) + '...');
+              return value;
+            }
+          }
+        }
+      }
+      
+      console.log('Larry Extension: No valid tokens found');
+      return '';
     } catch (error) {
-      console.warn('Larry Extension: Failed to read token from localStorage:', error);
+      console.warn('Larry Extension: Failed to read token from storage:', error);
       return '';
     }
   }
@@ -100,28 +202,45 @@
 
       console.log('Larry Extension: Starting to parse filters from page...');
 
-      // Parse loading places - try multiple selectors
-      let loadingInputs = document.querySelectorAll('[data-ctx*="place-loading_place"] input[type="text"]');
-      if (loadingInputs.length === 0) {
-        // Try alternative selectors
-        loadingInputs = document.querySelectorAll('input[name*="loading_place"]');
-      }
-      if (loadingInputs.length === 0) {
-        // Try more generic approach
-        loadingInputs = document.querySelectorAll('input[placeholder*="loading"], input[placeholder*="завантаження"]');
-      }
+      // Parse loading places - використовуємо точні селектори з HTML
+      console.log('Larry Extension: Пошук полів завантаження...');
       
-      console.log('Found loading inputs:', loadingInputs.length);
+      // Шукаємо контейнери завантаження за data-ctx
+      const loadingContainers = document.querySelectorAll('[data-ctx*="place-loading_place"]');
+      console.log('Larry Extension: Знайдено контейнерів завантаження:', loadingContainers.length);
       
-      // Process loading points with async geocoding
-      for (let index = 0; index < loadingInputs.length; index++) {
-        const input = loadingInputs[index];
-        if (input.value && input.value.trim()) {
-          console.log(`Processing loading input ${index}:`, input.value);
-          const locationData = await parseLocationString(input.value);
+      // Process loading points
+      for (let index = 0; index < loadingContainers.length; index++) {
+        const container = loadingContainers[index];
+        
+        // Шукаємо поле адреси в контейнері
+        const addressInput = container.querySelector('input[type="text"][placeholder*="локалізацію"], input[type="text"][placeholder*="location"]') ||
+                            container.querySelector('input[type="text"]');
+        
+        // Шукаємо поле радіусу в контейнері - ТОЧНИЙ СЕЛЕКТОР
+        const rangeInput = container.querySelector('input[name="range"][data-ctx="numberInput"]') ||
+                          container.querySelector('input[name="range"]') ||
+                          container.querySelector('[data-ctx="rangeOptionsInput"] input[data-ctx="numberInput"]');
+        
+        console.log(`Larry Extension: Контейнер завантаження ${index + 1}:`, {
+          addressValue: addressInput?.value,
+          rangeValue: rangeInput?.value,
+          rangeId: rangeInput?.id,
+          addressInput: !!addressInput,
+          rangeInput: !!rangeInput
+        });
+        
+        if (addressInput && addressInput.value && addressInput.value.trim()) {
+          console.log(`Larry Extension: Обробка адреси завантаження ${index + 1}:`, addressInput.value);
+          
+          // Парсимо адресу в форматі "PL, 30-001, Kraków"
+          const locationData = await parseLocationString(addressInput.value);
           if (locationData) {
-            const rangeInput = input.closest('[data-ctx*="place-loading_place"]')?.querySelector('[name="range"]') ||
-                              input.closest('.form-group, .field-group')?.querySelector('[name="range"], input[type="number"]');
+            // ВАЖЛИВО: Беремо радіус з поля range або дефолтний
+            const range = rangeInput && rangeInput.value ? parseInt(rangeInput.value) || 50 : 50;
+            
+            console.log(`Larry Extension: ✅ Використовуємо радіус ${range} км для завантаження ${index + 1}`);
+            
             filters.loadingPoints.push({
               id: `lp${index + 1}`,
               locality: locationData.locality,
@@ -129,30 +248,60 @@
               country: locationData.country,
               latitude: locationData.latitude || 0,
               longitude: locationData.longitude || 0,
-              range: rangeInput ? parseInt(rangeInput.value) || 50 : 50
+              range: range,
+              extensionAddress: addressInput.value // Зберігаємо оригінальну адресу з Extension
+            });
+            
+            console.log(`Larry Extension: ✅ Додано точку завантаження:`, {
+              locality: locationData.locality,
+              postalCode: locationData.postalCode,
+              country: locationData.country,
+              range: range,
+              extensionAddress: addressInput.value
             });
           }
         }
       }
 
-      // Parse unloading places - try multiple selectors
-      let unloadingInputs = document.querySelectorAll('[data-ctx*="place-unloading_place"] input[type="text"]');
-      if (unloadingInputs.length === 0) {
-        unloadingInputs = document.querySelectorAll('input[name*="unloading_place"]');
-      }
-      if (unloadingInputs.length === 0) {
-        unloadingInputs = document.querySelectorAll('input[placeholder*="unloading"], input[placeholder*="розвантаження"]');
-      }
+      // Parse unloading places - використовуємо точні селектори з HTML
+      console.log('Larry Extension: Пошук полів розвантаження...');
       
-      console.log('Found unloading inputs:', unloadingInputs.length);
+      // Шукаємо контейнери розвантаження за data-ctx
+      const unloadingContainers = document.querySelectorAll('[data-ctx*="place-unloading_place"]');
+      console.log('Larry Extension: Знайдено контейнерів розвантаження:', unloadingContainers.length);
       
-      // Process unloading points with async geocoding
-      for (let index = 0; index < unloadingInputs.length; index++) {
-        const input = unloadingInputs[index];
-        if (input.value && input.value.trim()) {
-          console.log(`Processing unloading input ${index}:`, input.value);
-          const locationData = await parseLocationString(input.value);
+      // Process unloading points
+      for (let index = 0; index < unloadingContainers.length; index++) {
+        const container = unloadingContainers[index];
+        
+        // Шукаємо поле адреси в контейнері
+        const addressInput = container.querySelector('input[type="text"][placeholder*="локалізацію"], input[type="text"][placeholder*="location"]') ||
+                            container.querySelector('input[type="text"]');
+        
+        // Шукаємо поле радіусу в контейнері - ТОЧНИЙ СЕЛЕКТОР
+        const rangeInput = container.querySelector('input[name="range"][data-ctx="numberInput"]') ||
+                          container.querySelector('input[name="range"]') ||
+                          container.querySelector('[data-ctx="rangeOptionsInput"] input[data-ctx="numberInput"]');
+        
+        console.log(`Larry Extension: Контейнер розвантаження ${index + 1}:`, {
+          addressValue: addressInput?.value,
+          rangeValue: rangeInput?.value,
+          rangeId: rangeInput?.id,
+          addressInput: !!addressInput,
+          rangeInput: !!rangeInput
+        });
+        
+        if (addressInput && addressInput.value && addressInput.value.trim()) {
+          console.log(`Larry Extension: Обробка адреси розвантаження ${index + 1}:`, addressInput.value);
+          
+          // Парсимо адресу в форматі "PL, 80-001, Gdańsk"
+          const locationData = await parseLocationString(addressInput.value);
           if (locationData) {
+            // ВАЖЛИВО: Беремо радіус з поля range або дефолтний
+            const range = rangeInput && rangeInput.value ? parseInt(rangeInput.value) || 50 : 50;
+            
+            console.log(`Larry Extension: ✅ Використовуємо радіус ${range} км для розвантаження ${index + 1}`);
+            
             filters.unloadingPoints.push({
               id: `up${index + 1}`,
               locality: locationData.locality,
@@ -160,7 +309,16 @@
               country: locationData.country,
               latitude: locationData.latitude || 0,
               longitude: locationData.longitude || 0,
-              range: 50 // default range for unloading
+              range: range,
+              extensionAddress: addressInput.value // Зберігаємо оригінальну адресу з Extension
+            });
+            
+            console.log(`Larry Extension: ✅ Додано точку розвантаження:`, {
+              locality: locationData.locality,
+              postalCode: locationData.postalCode,
+              country: locationData.country,
+              range: range,
+              extensionAddress: addressInput.value
             });
           }
         }
@@ -361,6 +519,36 @@
       }
 
       console.log('Larry Extension: Final parsed filters:', filters);
+      
+      // Log specific values for debugging
+      console.log('Larry Extension: 📍 Address debug:');
+      filters.loadingPoints.forEach((point, index) => {
+        console.log(`  🚛 Loading ${index + 1}:`, {
+          extensionAddress: point.extensionAddress,
+          locality: point.locality,
+          postalCode: point.postalCode,
+          country: point.country,
+          range: point.range
+        });
+      });
+      
+      filters.unloadingPoints.forEach((point, index) => {
+        console.log(`  🚚 Unloading ${index + 1}:`, {
+          extensionAddress: point.extensionAddress,
+          locality: point.locality,
+          postalCode: point.postalCode,
+          country: point.country,
+          range: point.range
+        });
+      });
+      
+      // Перевіряємо, чи є дані для передачі
+      const hasLocationData = filters.loadingPoints.length > 0 || filters.unloadingPoints.length > 0;
+      if (hasLocationData) {
+        console.log('✅ Larry Extension: Location data successfully extracted!');
+      } else {
+        console.warn('⚠️ Larry Extension: No location data found on page');
+      }
       
       // Log specific weight values for debugging
       console.log('Larry Extension: Weight debug - minWeight:', filters.minWeight, 'maxWeight:', filters.maxWeight);

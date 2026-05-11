@@ -76,7 +76,7 @@ export const AI_REQUEST_CONFIG = {
   TEMPERATURE: 0.7,
 
   // Preferred AI service: 'gemini' | 'groq' | 'openai' | 'claude'
-  PREFERRED_SERVICE: 'gemini' as const,
+  PREFERRED_SERVICE: 'gemini' as 'gemini' | 'groq' | 'openai' | 'claude',
   
   // Debug settings
   SAVE_PROMPTS_TO_FILE: true,

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Proxy Test</title>
+</head>
+<body>
+    <h1>Proxy Server Test</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testProxy() {
+            const results = document.getElementById('results');
+            
+            // Test 1: Health check
+            try {
+                const healthResponse = await fetch('/health');
+                const healthData = await healthResponse.json();
+                results.innerHTML += `<p><strong>Health Check:</strong> ✅ ${JSON.stringify(healthData)}</p>`;
+            } catch (error) {
+                results.innerHTML += `<p><strong>Health Check:</strong> ❌ ${error.message}</p>`;
+            }
+            
+            // Test 2: Status check
+            try {
+                const statusResponse = await fetch('/status');
+                const statusData = await statusResponse.json();
+                results.innerHTML += `<p><strong>Status Check:</strong> ✅ ${JSON.stringify(statusData)}</p>`;
+            } catch (error) {
+                results.innerHTML += `<p><strong>Status Check:</strong> ❌ ${error.message}</p>`;
+            }
+            
+            // Test 3: Geocoder test
+            try {
+                const geocoderResponse = await fetch('/app/geocoder-api/api/v2/locations?search=Gdańsk&lang=ua&filter={"type":["locality_postal_area"]}&offset=0&limit=1');
+                const geocoderData = await geocoderResponse.json();
+                results.innerHTML += `<p><strong>Geocoder Test:</strong> ✅ ${JSON.stringify(geocoderData)}</p>`;
+            } catch (error) {
+                results.innerHTML += `<p><strong>Geocoder Test:</strong> ❌ ${error.message}</p>`;
+            }
+            
+            // Test 4: Freight offers test
+            try {
+                const freightResponse = await fetch('/app/exchange/api/rest/v2/freight-offers?limit=1');
+                const freightData = await freightResponse.json();
+                results.innerHTML += `<p><strong>Freight Offers Test:</strong> ✅ ${JSON.stringify(freightData)}</p>`;
+            } catch (error) {
+                results.innerHTML += `<p><strong>Freight Offers Test:</strong> ❌ ${error.message}</p>`;
+            }
+        }
+        
+        // Run tests when page loads
+        window.onload = testProxy;
+    </script>
+</body>
+</html>

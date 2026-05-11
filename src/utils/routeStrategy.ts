@@ -1,56 +1,50 @@
 /**
  * Route Optimization Strategy Manager
  * 
- * Manages different route optimization strategies and selects the appropriate one
- * based on configuration settings.
+ * Manages route optimization using the new enhanced strategy only.
  */
 
 import type { FreightOffer, OptimizedRoute } from '../types';
-import { buildOptimizedRoutes } from './routeOptimizer';
-import { buildAIOptimizedRoutes } from './aiOptimizer';
-import { buildDFSOptimizedRoutes } from './strategies/dfs';
+import type { OptimizedRoute as NewStrategyOptimizedRoute } from './strategies/new_strategy/models/optimizationModels';
 
-// Available optimization strategies
-export enum RouteStrategy {
-  INTERNAL_ALGORITHM = 'internal',
-  AI_OPTIMIZATION = 'ai',
-  DFS_BRANCH_BOUND = 'dfs', // New DFS strategy
-  HYBRID = 'hybrid', // Future: combine both approaches
-  GREEDY = 'greedy', // Future: simple greedy algorithm
-  GENETIC = 'genetic', // Future: genetic algorithm
-}
+// Available optimization strategies - тільки нова стратегія
+export const RouteStrategy = {
+  NEW_STRATEGY: 'new_strategy', // New enhanced strategy with Redis and proxy
+} as const;
+
+export type RouteStrategy = typeof RouteStrategy[keyof typeof RouteStrategy];
 
 // Strategy configuration interface
 export interface StrategyConfig {
   strategy: RouteStrategy;
   
-  // Common parameters for all strategies
+  // Common parameters
   maxEmptyRunPercent: number;
   homeBaseLat: number;
   homeBaseLon: number;
-  departureFrom: string;
-  departureTo: string;
-  returnFrom: string;
-  returnTo: string;
+  departureDate: string;
+  returnDate: string;
   averageSpeedKmh: number;
   
   // Internal algorithm specific
   daysOnRoad?: number;
   minPricePerKm?: number;
   
+  // Trans.eu specific
+  vehicleType?: 'truck' | 'van';
+  bearerToken?: string;
+  transeuProgressCallback?: (progress: {
+    phase: string;
+    completed: number;
+    total: number;
+    currentBatch?: number;
+    totalBatches?: number;
+    totalApiRequests?: number;
+    completedApiRequests?: number;
+  }) => void;
+  
   // AI specific
   aiStatusCallback?: (status: string) => void;
-  
-  // Future strategy parameters
-  hybridWeights?: {
-    aiWeight: number;
-    internalWeight: number;
-  };
-  geneticParams?: {
-    populationSize: number;
-    generations: number;
-    mutationRate: number;
-  };
 }
 
 // Strategy metadata for UI display
@@ -65,100 +59,28 @@ export interface StrategyInfo {
   available: boolean;
 }
 
-// Available strategies with metadata
+// Available strategies with metadata - тільки нова стратегія
 export const AVAILABLE_STRATEGIES: StrategyInfo[] = [
   {
-    id: RouteStrategy.AI_OPTIMIZATION,
-    name: 'AI Оптимізація',
-    description: 'Використовує штучний інтелект для пошуку найкращих маршрутів',
-    icon: '🤖',
+    id: RouteStrategy.NEW_STRATEGY,
+    name: 'Нова Стратегія (Enhanced)',
+    description: 'Покращена система оптимізації з Redis кешуванням, проксі-сервером та розширеними можливостями',
+    icon: '🚀',
     pros: [
-      'Знаходить складні комбінації маршрутів',
-      'Враховує багато факторів одночасно',
-      'Постійно покращується',
-      'Може обробляти великі обсяги даних'
+      'Найшвидша обробка завдяки Redis кешуванню',
+      'Покращений проксі-сервер з JWT автентифікацією',
+      'Розширені можливості сканування та оптимізації',
+      'Модульна архітектура для легкого розширення',
+      'Детальна статистика та моніторинг',
+      'Автоматичне кешування маршрутів'
     ],
     cons: [
-      'Потребує API ключ',
-      'Може бути повільніше',
-      'Залежить від інтернет з\'єднання'
+      'Потребує Redis сервер',
+      'Більш складна конфігурація'
     ],
     recommended: true,
     available: true,
-  },
-  {
-    id: RouteStrategy.DFS_BRANCH_BOUND,
-    name: 'DFS Branch & Bound',
-    description: 'Детермінований алгоритм пошуку в глибину з відсіканням гілок',
-    icon: '🔍',
-    pros: [
-      'Дуже швидкий (мілісекунди)',
-      'Детермінований результат',
-      'Не потребує API ключів',
-      'Працює офлайн',
-      'Оптимальне відсікання неперспективних варіантів'
-    ],
-    cons: [
-      'Обмежена складність комбінацій',
-      'Може пропустити креативні рішення',
-      'Залежить від якості евристик'
-    ],
-    recommended: false,
-    available: true,
-  },
-  {
-    id: RouteStrategy.INTERNAL_ALGORITHM,
-    name: 'Внутрішній Алгоритм',
-    description: 'Використовує вбудований алгоритм Branch-and-Bound',
-    icon: '🏆',
-    pros: [
-      'Швидкий та надійний',
-      'Працює офлайн',
-      'Не потребує API ключів',
-      'Передбачуваний результат'
-    ],
-    cons: [
-      'Обмежена складність маршрутів',
-      'Менше факторів враховується',
-      'Може пропустити оптимальні рішення'
-    ],
-    recommended: false,
-    available: true,
-  },
-  {
-    id: RouteStrategy.HYBRID,
-    name: 'Гібридний Підхід',
-    description: 'Комбінує AI та внутрішній алгоритм для кращих результатів',
-    icon: '⚡',
-    pros: [
-      'Найкращі результати',
-      'Резервний варіант при збоях AI',
-      'Балансує швидкість та якість'
-    ],
-    cons: [
-      'Складніша конфігурація',
-      'Довший час обробки'
-    ],
-    recommended: false,
-    available: false, // Not implemented yet
-  },
-  {
-    id: RouteStrategy.GREEDY,
-    name: 'Жадібний Алгоритм',
-    description: 'Простий та швидкий алгоритм для базової оптимізації',
-    icon: '⚡',
-    pros: [
-      'Дуже швидкий',
-      'Простий у використанні',
-      'Мінімальне споживання ресурсів'
-    ],
-    cons: [
-      'Не оптимальні результати',
-      'Не враховує складні залежності'
-    ],
-    recommended: false,
-    available: false, // Not implemented yet
-  },
+  }
 ];
 
 /**
@@ -169,226 +91,145 @@ export function getStrategyInfo(strategy: RouteStrategy): StrategyInfo | undefin
 }
 
 /**
- * Get available strategies (only implemented ones)
+ * Get available strategies (only new strategy)
  */
 export function getAvailableStrategies(): StrategyInfo[] {
   return AVAILABLE_STRATEGIES.filter(s => s.available);
 }
 
 /**
- * Get recommended strategy
+ * Get recommended strategy (always new strategy)
  */
 export function getRecommendedStrategy(): StrategyInfo {
-  return AVAILABLE_STRATEGIES.find(s => s.recommended) || AVAILABLE_STRATEGIES[0];
+  return AVAILABLE_STRATEGIES[0];
 }
 
 /**
- * Main strategy executor - routes optimization requests to appropriate strategy
+ * Main strategy executor - uses only new enhanced strategy
  */
 export async function executeRouteOptimization(
   offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
   config: StrategyConfig
 ): Promise<OptimizedRoute[]> {
   
-  console.log(`🎯 Strategy: Executing ${config.strategy} optimization`);
+  console.log(`🚀 Strategy: Executing new enhanced strategy optimization`);
   
-  switch (config.strategy) {
-    case RouteStrategy.AI_OPTIMIZATION:
-      return await executeAIStrategy(offers, config);
-      
-    case RouteStrategy.INTERNAL_ALGORITHM:
-      return executeInternalStrategy(offers, config);
-      
-    case RouteStrategy.DFS_BRANCH_BOUND:
-      return await executeDFSStrategy(offers, config);
-      
-    case RouteStrategy.HYBRID:
-      return await executeHybridStrategy(offers, config);
-      
-    case RouteStrategy.GREEDY:
-      return executeGreedyStrategy(offers, config);
-      
-    case RouteStrategy.GENETIC:
-      return executeGeneticStrategy(offers, config);
-      
-    default:
-      console.warn(`🎯 Strategy: Unknown strategy ${config.strategy}, falling back to internal algorithm`);
-      return executeInternalStrategy(offers, config);
-  }
+  // Завжди використовуємо нову стратегію
+  return await executeNewStrategy(offers, config);
 }
 
 /**
- * Execute AI optimization strategy
+ * Execute new enhanced strategy with Redis caching and proxy
  */
-async function executeAIStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
+async function executeNewStrategy(
+  _offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
   config: StrategyConfig
 ): Promise<OptimizedRoute[]> {
   
   if (config.aiStatusCallback) {
-    config.aiStatusCallback('🤖 AI аналізує пропозиції...');
+    config.aiStatusCallback('🚀 Використання нової покращеної стратегії...');
   }
   
   try {
-    const result = await buildAIOptimizedRoutes(
-      offers,
-      {
-        maxEmptyRunPercent: config.maxEmptyRunPercent,
-        homeBaseLat: config.homeBaseLat,
-        homeBaseLon: config.homeBaseLon,
-        departureFrom: config.departureFrom,
-        departureTo: config.departureTo,
-        returnFrom: config.returnFrom,
-        returnTo: config.returnTo,
-        averageSpeedKmh: config.averageSpeedKmh,
+    // Динамічно імпортуємо нову стратегію
+    const { createRouteOptimizationSystem } = await import('./strategies/new_strategy');
+    
+    // Створюємо систему оптимізації
+    const system = createRouteOptimizationSystem({
+      api: {
+        baseUrl: 'http://localhost:8848/api/trans',
+        apiKey: config.bearerToken
       },
-      config.aiStatusCallback
-    );
-    
-    if (config.aiStatusCallback) {
-      config.aiStatusCallback('✅ AI оптимізація завершена');
-    }
-    
-    return result;
-    
-  } catch (error) {
-    console.error('🎯 Strategy: AI optimization failed:', error);
-    
-    if (config.aiStatusCallback) {
-      config.aiStatusCallback(`❌ AI оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
-    }
-    
-    throw error;
-  }
-}
-
-/**
- * Execute DFS Branch & Bound strategy
- */
-async function executeDFSStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
-  config: StrategyConfig
-): Promise<OptimizedRoute[]> {
-  
-  if (config.aiStatusCallback) {
-    config.aiStatusCallback('🔍 DFS аналізує пропозиції...');
-  }
-  
-  try {
-    const result = await buildDFSOptimizedRoutes(
-      offers,
-      {
-        homeBaseLat: config.homeBaseLat,
-        homeBaseLon: config.homeBaseLon,
-        maxEmptyRunPercent: config.maxEmptyRunPercent,
-        averageSpeedKmh: config.averageSpeedKmh,
-        departureFrom: config.departureFrom,
-        departureTo: config.departureTo,
-        returnFrom: config.returnFrom,
-        returnTo: config.returnTo,
-        daysOnRoad: config.daysOnRoad || 7,
+      redis: {
+        host: 'localhost',
+        port: 6379,
+        db: 0,
+        keyPrefix: 'larry:routes:'
       },
-      config.aiStatusCallback
-    );
-    
+      optimization: {
+        maxDistance: 1000000, // 1000 км
+        minCapacity: 1,
+        maxCapacity: 50,
+        costPerKm: 1.2,
+        fuelConsumption: 35,
+        fuelPrice: 1.4
+      }
+    });
+
+    // Ініціалізуємо систему
+    await system.initialize();
+
     if (config.aiStatusCallback) {
-      config.aiStatusCallback('✅ DFS оптимізація завершена');
+      config.aiStatusCallback('🔍 Сканування та кешування маршрутів...');
     }
-    
-    return result;
+
+    // Сканируємо маршрути (якщо кеш порожній)
+    const scanResult = await system.scanRoutes();
+    console.log('🔍 Результат сканування:', scanResult);
+
+    if (config.aiStatusCallback) {
+      config.aiStatusCallback('🎯 Оптимізація маршрутів...');
+    }
+
+    // Оптимізуємо маршрути
+    const optimization = await system.optimizeRoutes({
+      maxDistance: 800000, // 800 км
+      minCapacity: 10,
+      costPerKm: config.averageSpeedKmh ? 1.5 : 1.2
+    });
+
+    if (config.aiStatusCallback) {
+      config.aiStatusCallback(`✅ Нова стратегія: знайдено ${optimization.totalRoutes} оптимізованих маршрутів`);
+    }
+
+    // Конвертуємо результати з нової стратегії в формат OptimizedRoute[]
+    const convertedRoutes: OptimizedRoute[] = optimization.routes.map(route => ({
+      id: route.id,
+      from: route.routeSegments?.loadingPoints[0]?.place?.address?.locality || 'Unknown',
+      to: route.routeSegments?.unloadingPoints[0]?.place?.address?.locality || 'Unknown',
+      distanceKm: Math.round(route.distance / 1000), // конвертуємо з метрів в км
+      loadingDate: config.departureDate,
+      unloadingDate: config.returnDate,
+      priceEUR: route.estimatedProfit,
+      pricePerKm: route.efficiency,
+      isEmpty: false,
+      optimizationScore: route.optimizationScore,
+      estimatedProfit: route.estimatedProfit,
+      fuelCost: route.fuelCost,
+      efficiency: route.efficiency,
+      recommendations: route.recommendations,
+      emptyRoadPercentage: route.emptyRoadPercentage || 0,
+      routeSegments: route.routeSegments
+    }));
+
+    console.log(`🚀 New Strategy: Successfully converted ${convertedRoutes.length} routes (no limits applied)`);
+    return convertedRoutes;
     
   } catch (error) {
-    console.error('🔍 DFS: Strategy execution failed:', error);
+    console.error('🚀 New Strategy: Execution failed:', error);
     
     if (config.aiStatusCallback) {
-      config.aiStatusCallback(`❌ DFS оптимізація не вдалася: ${error instanceof Error ? error.message : 'Невідома помилка'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Невідома помилка';
+      config.aiStatusCallback(`❌ Нова стратегія не вдалася: ${errorMessage}`);
     }
     
-    throw error;
+    // Повертаємо порожній масив при помилці
+    return [];
   }
-}
-
-/**
- * Execute internal algorithm strategy
- */
-function executeInternalStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
-  config: StrategyConfig
-): OptimizedRoute[] {
-  
-  return buildOptimizedRoutes(
-    offers,
-    {
-      daysOnRoad: config.daysOnRoad || 7,
-      maxEmptyRunPercent: config.maxEmptyRunPercent,
-      minPricePerKm: config.minPricePerKm || 0,
-      homeBaseLat: config.homeBaseLat,
-      homeBaseLon: config.homeBaseLon,
-      departureFrom: config.departureFrom,
-      departureTo: config.departureTo,
-      returnFrom: config.returnFrom,
-      returnTo: config.returnTo,
-      averageSpeedKmh: config.averageSpeedKmh,
-    }
-  );
-}
-
-/**
- * Execute hybrid strategy (AI + Internal)
- * TODO: Implement hybrid approach
- */
-async function executeHybridStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
-  config: StrategyConfig
-): Promise<OptimizedRoute[]> {
-  
-  console.log('🎯 Strategy: Hybrid strategy not implemented yet, falling back to AI');
-  
-  // For now, try AI first, fallback to internal if it fails
-  try {
-    return await executeAIStrategy(offers, config);
-  } catch (error) {
-    console.warn('🎯 Strategy: AI failed in hybrid mode, falling back to internal algorithm');
-    return executeInternalStrategy(offers, config);
-  }
-}
-
-/**
- * Execute greedy strategy
- * TODO: Implement greedy algorithm
- */
-function executeGreedyStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
-  config: StrategyConfig
-): OptimizedRoute[] {
-  
-  console.log('🎯 Strategy: Greedy strategy not implemented yet, falling back to internal algorithm');
-  return executeInternalStrategy(offers, config);
-}
-
-/**
- * Execute genetic algorithm strategy
- * TODO: Implement genetic algorithm
- */
-function executeGeneticStrategy(
-  offers: FreightOffer[] | { mainOffers: FreightOffer[]; returnOffers: FreightOffer[] },
-  config: StrategyConfig
-): OptimizedRoute[] {
-  
-  console.log('🎯 Strategy: Genetic strategy not implemented yet, falling back to internal algorithm');
-  return executeInternalStrategy(offers, config);
 }
 
 /**
  * Convert legacy boolean useAIOptimization to new strategy enum
  */
-export function legacyToStrategy(useAIOptimization: boolean): RouteStrategy {
-  return useAIOptimization ? RouteStrategy.AI_OPTIMIZATION : RouteStrategy.INTERNAL_ALGORITHM;
+export function legacyToStrategy(_useAIOptimization: boolean): RouteStrategy {
+  // Завжди повертаємо нову стратегію
+  return RouteStrategy.NEW_STRATEGY;
 }
 
 /**
  * Convert strategy enum to legacy boolean for backward compatibility
  */
-export function strategyToLegacy(strategy: RouteStrategy): boolean {
-  return strategy === RouteStrategy.AI_OPTIMIZATION;
+export function strategyToLegacy(_strategy: RouteStrategy): boolean {
+  // Завжди повертаємо false (не AI)
+  return false;
 }

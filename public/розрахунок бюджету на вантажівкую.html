@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logistic Pro: Фінансовий Аналіз та Калькулятор</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; color: #1e293b; scroll-behavior: smooth; }
+        .card { background: white; border-radius: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; transition: all 0.3s ease; }
+        .card:hover { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .input-group label { display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 0.4rem; }
+        input[type="range"] { height: 6px; -webkit-appearance: none; background: #cbd5e1; border-radius: 5px; width: 100%; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #2563eb; border-radius: 50%; cursor: pointer; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .formula { font-family: monospace; font-size: 0.7rem; color: #94a3b8; margin-top: 2px; }
+        .nav-link { color: #94a3b8; transition: color 0.2s; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .nav-link:hover { color: #38bdf8; }
+        .progress-container { background: #e2e8f0; height: 10px; border-radius: 10px; overflow: hidden; }
+        #workload_bar { height: 100%; transition: width 0.3s ease; }
+        .badge { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; }
+        .badge-fixed { background: #fee2e2; color: #991b1b; }
+        .badge-var { background: #fef3c7; color: #92400e; }
+    </style>
+</head>
+<body class="pb-10">
+
+    <header class="bg-slate-900 text-white pt-8 pb-16 px-6 sticky top-0 z-50 shadow-lg border-b border-slate-800">
+        <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-black tracking-tight uppercase italic">LOGISTIC PRO <span class="text-blue-500">Analyzer</span></h1>
+            </div>
+            <nav class="flex gap-6">
+                <a href="#calculator" class="nav-link"><i class="fas fa-calculator mr-2"></i>Калькулятор</a>
+                <a href="#break-even" class="nav-link"><i class="fas fa-chart-line mr-2"></i>Точка Нуль</a>
+            </nav>
+            <div id="header_profit_container" class="text-sm font-bold text-blue-400 bg-slate-800 px-4 py-2 rounded-full border border-slate-700 shadow-inner">
+                Прибуток: <span id="header_profit">€0</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 mt-8 space-y-8">
+        
+        <section id="calculator" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Left Controls -->
+            <div class="lg:col-span-4 space-y-4">
+                <div class="card p-6 border-t-4 border-blue-500">
+                    <h3 class="text-xs font-black mb-6 uppercase tracking-widest text-slate-400">Конфігурація Рейсу</h3>
+                    <div class="space-y-6">
+                        <div class="input-group">
+                            <div class="flex justify-between items-end mb-1">
+                                <label>Загальний пробіг</label>
+                                <span id="val_km" class="font-black text-blue-600 text-sm">12,000 км</span>
+                            </div>
+                            <input type="range" id="in_km" min="4000" max="16000" step="100" value="12000">
+                        </div>
+                        <div class="input-group">
+                            <div class="flex justify-between items-end mb-1">
+                                <label>Сер. швидкість</label>
+                                <span id="val_speed" class="font-black text-blue-600 text-sm">70 км/год</span>
+                            </div>
+                            <input type="range" id="in_speed" min="55" max="85" step="1" value="70">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="input-group">
+                                <label>Ставка (€/км)</label>
+                                <input type="number" id="in_rate" value="1.60" step="0.01" class="w-full border-b-2 border-slate-200 focus:border-blue-500 outline-none p-2 text-sm font-bold">
+                            </div>
+                            <div class="input-group">
+                                <label>Холостий (%)</label>
+                                <input type="number" id="in_empty" value="10" class="w-full border-b-2 border-slate-200 focus:border-blue-500 outline-none p-2 text-sm font-bold">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card p-6 border-t-4 border-emerald-500">
+                    <h3 class="text-xs font-black mb-4 uppercase tracking-widest text-slate-400">Водій та Час</h3>
+                    <div class="space-y-4">
+                        <div class="progress-container">
+                            <div id="workload_bar" style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-500 font-medium">За кермом: <span id="res_drive_hours" class="font-bold text-slate-800">0 год</span></span>
+                            <span id="hours_status" class="badge">В НОРМІ</span>
+                        </div>
+                        <div class="h-px bg-slate-100"></div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="input-group">
+                                <label>Основа (PLN)</label>
+                                <input type="number" id="in_d_base" value="4300" class="w-full border-b-2 border-slate-200 outline-none p-1 text-sm font-bold">
+                            </div>
+                            <div class="input-group">
+                                <label>Дієта (€/д)</label>
+                                <input type="number" id="in_d_diet" value="75" class="w-full border-b-2 border-slate-200 outline-none p-1 text-sm font-bold">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card p-6 border-t-4 border-amber-500">
+                    <h3 class="text-xs font-black mb-4 uppercase tracking-widest text-slate-400 text-amber-600">Експлуатація та Адмін</h3>
+                    <div class="space-y-3">
+                        <div class="flex justify-between text-xs"><span>Лізинг (€)</span><input type="number" id="in_lease" value="1500" class="w-16 text-right font-bold"></div>
+                        <div class="flex justify-between text-xs text-blue-600 font-bold"><span>Сервіс/Ремонт (€/км)</span><input type="number" id="in_service_km" value="0.05" step="0.01" class="w-16 text-right font-bold text-blue-600"></div>
+                        <div class="flex justify-between text-xs text-blue-600 font-bold"><span>Шини (€/км)</span><input type="number" id="in_tires_km" value="0.02" step="0.01" class="w-16 text-right font-bold text-blue-600"></div>
+                        <div class="h-px bg-slate-100"></div>
+                        <div class="flex justify-between text-xs"><span>Бухгалтер (€)</span><input type="number" id="in_accountant" value="350" class="w-16 text-right font-bold"></div>
+                        <div class="flex justify-between text-xs"><span>Офіс (€)</span><input type="number" id="in_office" value="250" class="w-16 text-right font-bold"></div>
+                        <div class="flex justify-between text-xs"><span>GPS/ПО (€)</span><input type="number" id="in_software" value="150" class="w-16 text-right font-bold"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-8 space-y-6">
+                <!-- Financial Report -->
+                <div class="card overflow-hidden">
+                    <div class="bg-slate-800 p-4 text-white flex justify-between items-center">
+                        <h2 class="text-xs font-black uppercase tracking-widest">Аналіз витрат та доходів</h2>
+                        <span class="text-[10px] text-slate-400">ПОВНА МОДЕЛЬ OPEX</span>
+                    </div>
+                    <table class="w-full text-sm">
+                        <tbody class="divide-y divide-slate-100">
+                            <tr class="bg-blue-50/30">
+                                <td class="p-4"><strong>Загальний дохід</strong></td>
+                                <td class="p-4 text-right"><span class="badge bg-blue-100 text-blue-700 mr-2">Дохід</span><span id="res_rev" class="font-black text-blue-700 text-lg">€0</span></td>
+                            </tr>
+                            <tr>
+                                <td class="p-4">Паливо та AdBlue (€1.35/л)</td>
+                                <td class="p-4 text-right"><span class="badge badge-var mr-2">Змінні</span><span id="res_fuel" class="font-bold text-red-500">-€0</span></td>
+                            </tr>
+                            <tr>
+                                <td class="p-4">Дорожні збори (Tolls €0.22/км)</td>
+                                <td class="p-4 text-right"><span class="badge badge-var mr-2">Змінні</span><span id="res_tolls" class="font-bold text-red-500">-€0</span></td>
+                            </tr>
+                            <tr>
+                                <td class="p-4">Дієти водія (виплата за дні)</td>
+                                <td class="p-4 text-right"><span class="badge badge-var mr-2">Змінні</span><span id="res_diet_total" class="font-bold text-red-500">-€0</span></td>
+                            </tr>
+                            <tr class="text-blue-700 bg-blue-50/20 italic">
+                                <td class="p-4 font-semibold">Ремонт та амортизація шин</td>
+                                <td class="p-4 text-right"><span class="badge badge-var mr-2">Змінні</span><span id="res_maintenance" class="font-bold">-€0</span></td>
+                            </tr>
+                            <tr class="bg-slate-50">
+                                <td class="p-4">Основа водія + Податки</td>
+                                <td class="p-4 text-right"><span class="badge badge-fixed mr-2">Постійні</span><span id="res_driver_fixed" class="font-bold text-red-500">-€0</span></td>
+                            </tr>
+                            <tr class="bg-slate-50">
+                                <td class="p-4">Адмін. витрати (Офіс, Бухг, Лізинг)</td>
+                                <td class="p-4 text-right"><span class="badge badge-fixed mr-2">Постійні</span><span id="res_fixed_admin" class="font-bold text-red-500">-€0</span></td>
+                            </tr>
+                            <tr class="bg-blue-600 text-white">
+                                <td class="p-6 text-lg font-black uppercase">Чистий прибуток</td>
+                                <td class="p-6 text-right">
+                                    <div id="res_profit" class="text-3xl font-black">€0</div>
+                                    <div id="res_margin" class="text-[10px] opacity-80 font-bold uppercase">МАРЖА: 0%</div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Break-Even Card -->
+                <div id="break-even" class="card p-6 bg-gradient-to-br from-slate-800 to-slate-900 text-white border-none relative overflow-hidden">
+                    <div class="absolute top-0 right-0 p-8 opacity-10">
+                        <i class="fas fa-bullseye text-9xl"></i>
+                    </div>
+                    <div class="relative z-10">
+                        <h3 class="text-xs font-black uppercase tracking-widest text-blue-400 mb-6">Аналіз точки окупності</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <p class="text-slate-400 text-xs mb-1">Щоб покрити фіксовані витрати, треба проїхати:</p>
+                                <div id="res_be_km" class="text-4xl font-black text-white">0 км</div>
+                                <div class="mt-4 flex items-center gap-2">
+                                    <div class="h-2 flex-1 bg-slate-700 rounded-full overflow-hidden">
+                                        <div id="be_progress" class="h-full bg-blue-500" style="width: 0%"></div>
+                                    </div>
+                                    <span id="be_status_pct" class="text-[10px] font-bold text-slate-400">0%</span>
+                                </div>
+                            </div>
+                            <div class="space-y-4">
+                                <div class="flex justify-between items-center bg-slate-700/50 p-3 rounded-xl border border-slate-600">
+                                    <span class="text-[10px] uppercase font-bold text-slate-400 italic">Собівартість км</span>
+                                    <span id="res_cost_km" class="font-black text-amber-400">€0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-slate-700/50 p-3 rounded-xl border border-slate-600">
+                                    <span class="text-[10px] uppercase font-bold text-slate-400 italic">Чистий € / 1 км</span>
+                                    <span id="res_net_km" class="font-black text-emerald-400">€0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const PLN_EUR = 0.23;
+        const TAX_DRIVER_MULT = 1.21;
+        const FUEL_CONS = 33 / 100;
+        const TOLL_RATE = 0.22;
+        const LEGAL_MAX_HOURS = 180;
+        const DRIVING_HOURS_PER_DAY = 9;
+
+        function update() {
+            try {
+                // Input elements
+                const km = parseFloat(document.getElementById('in_km').value) || 0;
+                const speed = parseFloat(document.getElementById('in_speed').value) || 0;
+                const rate = parseFloat(document.getElementById('in_rate').value) || 0;
+                const empty_pct = parseFloat(document.getElementById('in_empty').value) || 0;
+                const d_base_pln = parseFloat(document.getElementById('in_d_base').value) || 0;
+                const d_diet_eur = parseFloat(document.getElementById('in_d_diet').value) || 0;
+                
+                const lease = parseFloat(document.getElementById('in_lease').value) || 0;
+                const service_rate = parseFloat(document.getElementById('in_service_km').value) || 0;
+                const tires_rate = parseFloat(document.getElementById('in_tires_km').value) || 0;
+                
+                const accountant = parseFloat(document.getElementById('in_accountant').value) || 0;
+                const office = parseFloat(document.getElementById('in_office').value) || 0;
+                const software = parseFloat(document.getElementById('in_software').value) || 0;
+
+                // 1. Time Calculations
+                const drive_hours = km / speed;
+                const auto_days = Math.ceil(drive_hours / DRIVING_HOURS_PER_DAY);
+                const paid_km = km * (1 - empty_pct / 100);
+                
+                document.getElementById('val_km').innerText = km.toLocaleString() + ' км';
+                document.getElementById('val_speed').innerText = speed + ' км/год';
+                document.getElementById('res_drive_hours').innerText = Math.round(drive_hours) + ' год';
+
+                const workload_pct = Math.min((drive_hours / LEGAL_MAX_HOURS) * 100, 100);
+                const bar = document.getElementById('workload_bar');
+                const badge = document.getElementById('hours_status');
+                bar.style.width = workload_pct + '%';
+                if (drive_hours > LEGAL_MAX_HOURS) {
+                    bar.style.backgroundColor = '#ef4444';
+                    badge.innerText = 'НЕЗАКОННО';
+                    badge.className = 'badge bg-red-100 text-red-700';
+                } else if (drive_hours > LEGAL_MAX_HOURS * 0.85) {
+                    bar.style.backgroundColor = '#f59e0b';
+                    badge.innerText = 'РИЗИК';
+                    badge.className = 'badge bg-amber-100 text-amber-700';
+                } else {
+                    bar.style.backgroundColor = '#10b981';
+                    badge.innerText = 'В НОРМІ';
+                    badge.className = 'badge bg-emerald-100 text-emerald-700';
+                }
+
+                // 2. Variable Costs (VC)
+                const fuel_cost = (km * FUEL_CONS * 1.35) + (km * 0.015);
+                const toll_cost = km * TOLL_RATE;
+                const diet_total = auto_days * d_diet_eur;
+                const maintenance_cost = km * (service_rate + tires_rate); // Service + Tires
+                const total_vc = fuel_cost + toll_cost + diet_total + maintenance_cost;
+
+                // 3. Fixed Costs (FC)
+                const driver_fixed = (d_base_pln * PLN_EUR) * TAX_DRIVER_MULT;
+                const admin_fixed = lease + accountant + office + software;
+                const total_fc = driver_fixed + admin_fixed;
+
+                // 4. Outcomes
+                const revenue = paid_km * rate;
+                const total_exp = total_vc + total_fc;
+                const profit = revenue - total_exp;
+                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                const cost_per_km = total_exp / km;
+                const net_per_km = profit / km;
+
+                document.getElementById('res_rev').innerText = `€${Math.round(revenue).toLocaleString()}`;
+                document.getElementById('res_fuel').innerText = `-€${Math.round(fuel_cost).toLocaleString()}`;
+                document.getElementById('res_tolls').innerText = `-€${Math.round(toll_cost).toLocaleString()}`;
+                document.getElementById('res_diet_total').innerText = `-€${Math.round(diet_total).toLocaleString()}`;
+                document.getElementById('res_maintenance').innerText = `-€${Math.round(maintenance_cost).toLocaleString()}`;
+                document.getElementById('res_driver_fixed').innerText = `-€${Math.round(driver_fixed).toLocaleString()}`;
+                document.getElementById('res_fixed_admin').innerText = `-€${Math.round(admin_fixed).toLocaleString()}`;
+                document.getElementById('res_profit').innerText = `€${Math.round(profit).toLocaleString()}`;
+                document.getElementById('res_margin').innerText = `МАРЖА: ${margin.toFixed(1)}%`;
+                document.getElementById('header_profit').innerText = `€${Math.round(profit).toLocaleString()}`;
+
+                // 5. Break-Even Analysis
+                // Contribution margin per km = (Revenue per km) - (Variable cost per km)
+                const rev_per_km = paid_km * rate / km;
+                const vc_per_km = total_vc / km;
+                const cm_per_km = rev_per_km - vc_per_km;
+                
+                let break_even_km = 0;
+                if (cm_per_km > 0) {
+                    break_even_km = total_fc / cm_per_km;
+                }
+
+                document.getElementById('res_be_km').innerText = Math.round(break_even_km).toLocaleString() + ' км';
+                document.getElementById('res_cost_km').innerText = `€${cost_per_km.toFixed(2)}`;
+                document.getElementById('res_net_km').innerText = `€${net_per_km.toFixed(2)}`;
+                
+                const be_progress_pct = Math.min((km / break_even_km) * 100, 100);
+                document.getElementById('be_progress').style.width = be_progress_pct + '%';
+                document.getElementById('be_status_pct').innerText = Math.round(be_progress_pct) + '% ПЛАНУ';
+
+            } catch (e) { console.error(e); }
+        }
+
+        document.querySelectorAll('input').forEach(el => el.addEventListener('input', update));
+        window.onload = update;
+    </script>
+</body>
+</html>

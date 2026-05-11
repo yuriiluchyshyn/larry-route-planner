@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: larry-route-planner
+  labels:
+    name: larry-route-planner
+    app: larry-route-planner
+    environment: production
+    team: logistics
+  annotations:
+    description: "Larry Route Planner - Truck Route Optimization System"
+    contact: "admin@yourdomain.com"
+    version: "1.0.0"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: larry-resource-quota
+  namespace: larry-route-planner
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    requests.storage: 100Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    persistentvolumeclaims: "5"
+    pods: "10"
+    services: "10"
+    secrets: "10"
+    configmaps: "10"
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: larry-limit-range
+  namespace: larry-route-planner
+spec:
+  limits:
+  - default:
+      cpu: "1"
+      memory: "2Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+    type: Container
+  - max:
+      cpu: "8"
+      memory: "16Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+    type: Container

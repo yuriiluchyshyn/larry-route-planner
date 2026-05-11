@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор рентабельності буса до 3.5т</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        input[type="range"] { accent-color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        
+        <header class="mb-8 text-center md:text-left">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-blue-900 mb-2">Калькулятор рентабельності (Бус до 3.5т)</h1>
+            <p class="text-gray-600">Розрахунок чистого прибутку та нульової точки (Break-even point) для ФОП на ричалті.</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Ліва колонка: Змінні параметри (Повзунки) -->
+            <div class="lg:col-span-1 space-y-6">
+                
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                    <h2 class="text-xl font-bold text-gray-800 mb-5 border-b pb-2"><i class="fa-solid fa-route text-blue-500 mr-2"></i>Параметри рейсів</h2>
+                    
+                    <!-- Пробіг -->
+                    <div class="mb-6">
+                        <label class="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                            <span>Місячний пробіг (км)</span>
+                            <span id="valMileage" class="font-bold text-blue-600">10 000 км</span>
+                        </label>
+                        <input type="range" id="inMileage" min="0" max="25000" step="500" value="10000" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- Ставка -->
+                    <div class="mb-6">
+                        <label class="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                            <span>Ставка за 1 км (з вантажем)</span>
+                            <span class="font-bold text-blue-600"><span id="valRate">2.50</span> PLN</span>
+                        </label>
+                        <input type="range" id="inRate" min="1.0" max="5.0" step="0.05" value="2.50" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- Холостий хід -->
+                    <div class="mb-6">
+                        <label class="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                            <span>Холостий хід (% від пробігу)</span>
+                            <span class="font-bold text-red-500"><span id="valEmpty">20</span>%</span>
+                        </label>
+                        <input type="range" id="inEmpty" min="0" max="100" step="1" value="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        <p class="text-xs text-gray-500 mt-1">Відсоток кілометрів, за які тобі не платять.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                    <h2 class="text-xl font-bold text-gray-800 mb-5 border-b pb-2"><i class="fa-solid fa-gas-pump text-orange-500 mr-2"></i>Змінні витрати</h2>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Витрата (л/100км)</label>
+                            <input type="number" id="inFuelCons" value="10.5" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Ціна палива (PLN)</label>
+                            <input type="number" id="inFuelPrice" value="6.50" step="0.05" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ремонти, шини, автостради (PLN/км)</label>
+                        <input type="number" id="inMaint" value="0.20" step="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">Резерв на сервіс та дрібні оплати доріг.</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Центральна колонка: Фіксовані витрати -->
+            <div class="lg:col-span-1 space-y-6">
+                
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                    <h2 class="text-xl font-bold text-gray-800 mb-5 border-b pb-2"><i class="fa-solid fa-lock text-gray-500 mr-2"></i>Фіксовані витрати (міс)</h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Амортизація буса (PLN)</label>
+                            <input type="number" id="inAmort" value="1343" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">15k EUR / 4 роки = ~1343 PLN. Гроші, які авто "з'їдає" втрачаючи ціну.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Податок на здоров'я (Zdrowotna)</label>
+                            <input type="number" id="inHealth" value="419" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                            <p class="text-xs text-gray-500 mt-1">Обов'язкова для ричалту (до 60 тис доходу - 419 zł).</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Бухгалтерія (PLN)</label>
+                            <input type="number" id="inAcc" value="250" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Страховки (OC/AC/OCP) в міс.</label>
+                            <input type="number" id="inIns" value="700" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Ставка податку Ричалт (%)</label>
+                            <select id="inTaxRate" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="5.5" selected>5.5% (Стандарт для транспорту)</option>
+                                <option value="8.5">8.5% (Інші послуги)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Права колонка: Результати -->
+            <div class="lg:col-span-1 space-y-6">
+                
+                <div class="bg-gray-800 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+                    <!-- Декоративні елементи -->
+                    <div class="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 rounded-full bg-gray-700 opacity-50 blur-2xl"></div>
+                    
+                    <h2 class="text-xl font-bold mb-6 text-gray-100 border-b border-gray-600 pb-2">Результат за місяць</h2>
+                    
+                    <div class="space-y-4 text-sm relative z-10">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-300">Брудний дохід (Оборот):</span>
+                            <span class="font-bold text-lg" id="outRevenue">0 PLN</span>
+                        </div>
+                        
+                        <div class="border-t border-gray-600 pt-3">
+                            <div class="flex justify-between items-center text-red-300 mb-1">
+                                <span>- Змінні витрати (паливо, сервіс):</span>
+                                <span id="outVarCosts">0 PLN</span>
+                            </div>
+                            <div class="flex justify-between items-center text-red-300 mb-1">
+                                <span>- Фіксовані витрати + Аморт.:</span>
+                                <span id="outFixedCosts">0 PLN</span>
+                            </div>
+                            <div class="flex justify-between items-center text-red-300 mb-1">
+                                <span>- Податок (Ричалт):</span>
+                                <span id="outTax">0 PLN</span>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-gray-500 pt-4 mt-2">
+                            <span class="block text-gray-300 mb-1 text-center">Чистий прибуток (на руки):</span>
+                            <div class="text-4xl font-black text-center" id="outProfit">0 PLN</div>
+                            <div class="text-center text-xs text-gray-400 mt-2">Маржинальність: <span id="outMargin">0</span>%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Нульова точка (Break-Even Point) -->
+                <div class="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl shadow-sm">
+                    <h3 class="text-lg font-bold text-emerald-800 mb-2"><i class="fa-solid fa-bullseye mr-2"></i>Нульова точка</h3>
+                    <p class="text-sm text-emerald-700 mb-4">Скільки кілометрів треба проїхати з цими параметрами, щоб відбити фіксовані витрати та вийти в "нуль":</p>
+                    <div class="text-3xl font-black text-emerald-600 text-center" id="outBEP">
+                        0 км
+                    </div>
+                    <p class="text-xs text-center text-emerald-600 mt-2" id="bepNote"></p>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const inputs = {
+            mileage: document.getElementById('inMileage'),
+            rate: document.getElementById('inRate'),
+            empty: document.getElementById('inEmpty'),
+            fuelCons: document.getElementById('inFuelCons'),
+            fuelPrice: document.getElementById('inFuelPrice'),
+            maint: document.getElementById('inMaint'),
+            amort: document.getElementById('inAmort'),
+            health: document.getElementById('inHealth'),
+            acc: document.getElementById('inAcc'),
+            ins: document.getElementById('inIns'),
+            taxRate: document.getElementById('inTaxRate')
+        };
+
+        const displays = {
+            valMileage: document.getElementById('valMileage'),
+            valRate: document.getElementById('valRate'),
+            valEmpty: document.getElementById('valEmpty'),
+            outRevenue: document.getElementById('outRevenue'),
+            outVarCosts: document.getElementById('outVarCosts'),
+            outFixedCosts: document.getElementById('outFixedCosts'),
+            outTax: document.getElementById('outTax'),
+            outProfit: document.getElementById('outProfit'),
+            outMargin: document.getElementById('outMargin'),
+            outBEP: document.getElementById('outBEP'),
+            bepNote: document.getElementById('bepNote')
+        };
+
+        // Format numbers
+        const formatMoney = (num) => {
+            return new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN' }).format(num);
+        };
+        const formatNum = (num) => {
+            return new Intl.NumberFormat('pl-PL').format(num);
+        };
+
+        function calculate() {
+            // Get values
+            const totalKm = parseFloat(inputs.mileage.value);
+            const rate = parseFloat(inputs.rate.value);
+            const emptyPct = parseFloat(inputs.empty.value) / 100;
+            const fuelCons = parseFloat(inputs.fuelCons.value);
+            const fuelPrice = parseFloat(inputs.fuelPrice.value);
+            const maint = parseFloat(inputs.maint.value);
+            
+            const fixedCosts = parseFloat(inputs.amort.value) + 
+                               parseFloat(inputs.health.value) + 
+                               parseFloat(inputs.acc.value) + 
+                               parseFloat(inputs.ins.value);
+            
+            const taxRate = parseFloat(inputs.taxRate.value) / 100;
+
+            // Update range displays
+            displays.valMileage.textContent = formatNum(totalKm) + " км";
+            displays.valRate.textContent = rate.toFixed(2);
+            displays.valEmpty.textContent = (emptyPct * 100).toFixed(0);
+
+            // Math
+            const loadedKm = totalKm * (1 - emptyPct);
+            const revenue = loadedKm * rate; // Брудний дохід тільки за платні км
+            
+            const fuelCostPerKm = (fuelCons / 100) * fuelPrice;
+            const totalVarCostPerKm = fuelCostPerKm + maint; // Змінні витрати на 1 км (паливо + сервіс)
+            const totalVarCosts = totalKm * totalVarCostPerKm; // Витрати за всі км (і пусті і повні)
+
+            const tax = revenue * taxRate; // Податок з брудного доходу
+            
+            const totalCosts = totalVarCosts + fixedCosts + tax;
+            const profit = revenue - totalCosts;
+            const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+            // Break Even Point Calculation
+            // Revenue(x) = x * (1 - emptyPct) * rate
+            // VarCost(x) = x * totalVarCostPerKm
+            // Tax(x) = Revenue(x) * taxRate
+            // Profit = 0 => Revenue(x) - VarCost(x) - Tax(x) - fixedCosts = 0
+            // x * [ (1 - emptyPct) * rate * (1 - taxRate) - totalVarCostPerKm ] = fixedCosts
+            const netMarginPerKm = ((1 - emptyPct) * rate * (1 - taxRate)) - totalVarCostPerKm;
+            let bepKm = 0;
+            let isProfitableModel = true;
+
+            if (netMarginPerKm > 0) {
+                bepKm = fixedCosts / netMarginPerKm;
+            } else {
+                isProfitableModel = false;
+            }
+
+            // Render Output
+            displays.outRevenue.textContent = formatMoney(revenue);
+            displays.outVarCosts.textContent = formatMoney(totalVarCosts);
+            displays.outFixedCosts.textContent = formatMoney(fixedCosts);
+            displays.outTax.textContent = formatMoney(tax);
+            
+            displays.outProfit.textContent = formatMoney(profit);
+            displays.outMargin.textContent = margin.toFixed(1);
+
+            // Styling profit
+            if (profit > 0) {
+                displays.outProfit.className = "text-4xl font-black text-center text-green-400";
+            } else if (profit < 0) {
+                displays.outProfit.className = "text-4xl font-black text-center text-red-400";
+            } else {
+                displays.outProfit.className = "text-4xl font-black text-center text-gray-200";
+            }
+
+            // Render BEP
+            if (isProfitableModel) {
+                displays.outBEP.textContent = formatNum(Math.ceil(bepKm)) + " км";
+                displays.outBEP.className = "text-3xl font-black text-center text-emerald-600";
+                displays.bepNote.textContent = "Після цього пробігу кожен кілометр приносить чистий плюс.";
+                
+                if (bepKm > totalKm) {
+                    displays.bepNote.textContent = "Увага! При поточному пробігу ти не досягаєш нульової точки.";
+                    displays.bepNote.classList.add("text-red-500");
+                } else {
+                    displays.bepNote.classList.remove("text-red-500");
+                }
+
+            } else {
+                displays.outBEP.textContent = "Ніколи";
+                displays.outBEP.className = "text-3xl font-black text-center text-red-600";
+                displays.bepNote.textContent = "Збиткова бізнес-модель! Твої витрати на 1 км перевищують дохід з урахуванням пустих пробігів.";
+            }
+        }
+
+        // Add Event Listeners to all inputs
+        Object.values(inputs).forEach(input => {
+            input.addEventListener('input', calculate);
+        });
+
+        // Initial calc
+        calculate();
+
+    </script>
+</body>
+</html>
