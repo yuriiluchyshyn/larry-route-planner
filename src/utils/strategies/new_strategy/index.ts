@@ -4,11 +4,8 @@
  * Враховує логіку: База → Loading Points → Uploading Points → База
  */
 
-import { RouteApiService } from './route/routeApiService';
 import { RedisRouteService } from './redis/redisRouteService';
-import { RoadOptimizer } from './route/roadOptimizer';
-import { RouteAnalyzer } from './route/routeAnalyzer';
-import { getOptimizationConfig, type OptimizationConfig, type DeepPartial } from './route/config/optimizationConfig';
+// import { getOptimizationConfig, type OptimizationConfig, type DeepPartial } from './route/config/optimizationConfig';
 
 // Експортуємо всі моделі
 export * from './models';
@@ -20,10 +17,8 @@ export * from './route/config/apiConfig';
 export * from './redis/config/redisConfig';
 
 // Експортуємо сервіси
-export * from './route/routeApiService';
 export * from './redis/redisRouteService';
 export * from './route/roadOptimizer';
-export * from './route/routeAnalyzer';
 
 // Імпортуємо типи з моделей
 import type { 
@@ -44,27 +39,15 @@ import type {
  * Головний клас для роботи з системою оптимізації маршрутів
  */
 export class RouteOptimizationSystem {
-  private apiService: RouteApiService;
   private redisService: RedisRouteService;
-  private optimizer: RoadOptimizer;
   private optimizationConfig: OptimizationConfig;
 
   constructor(config: RouteOptimizationConfig) {
     // Ініціалізуємо конфігурацію оптимізації
-    this.optimizationConfig = getOptimizationConfig(config.optimizationConfig);
-    
-    // Встановлюємо конфігурацію для RouteAnalyzer
-    RouteAnalyzer.setConfig(config.optimizationConfig || {});
+    // this.optimizationConfig = getOptimizationConfig(config.optimizationConfig);
     
     // Ініціалізуємо сервіси
-    this.apiService = new RouteApiService(config.api.baseUrl, config.api.apiKey);
     this.redisService = new RedisRouteService(config.redis);
-    this.optimizer = new RoadOptimizer(
-      this.apiService,
-      this.redisService,
-      config.optimization,
-      config.optimizationConfig // Передаємо конфігурацію оптимізації
-    );
   }
 
   /**
@@ -87,7 +70,8 @@ export class RouteOptimizationSystem {
    */
   async scanRoutes() {
     console.log('🔍 Запуск сканування маршрутів...');
-    return await this.optimizer.scanAndCacheRoutes();
+    // TODO: Реалізувати сканування через API
+    return { message: 'Сканування не реалізовано' };
   }
 
   /**
@@ -95,25 +79,24 @@ export class RouteOptimizationSystem {
    */
   async optimizeRoutes(params?: OptimizationParams) {
     console.log('🎯 Запуск оптимізації маршрутів...');
-    return await this.optimizer.optimizeRoutes(params);
+    // TODO: Реалізувати оптимізацію
+    return { message: 'Оптимізація не реалізована' };
   }
 
   /**
    * Отримати поточну конфігурацію оптимізації
    */
-  getOptimizationConfig(): OptimizationConfig {
-    return this.optimizationConfig;
-  }
+  // getOptimizationConfig(): OptimizationConfig {
+  //   return this.optimizationConfig;
+  // }
 
   /**
    * Оновити конфігурацію оптимізації
    */
-  updateOptimizationConfig(newConfig: DeepPartial<OptimizationConfig>): void {
-    this.optimizationConfig = getOptimizationConfig(newConfig);
-    RouteAnalyzer.setConfig(newConfig);
-    // Потрібно буде пересоздати optimizer з новою конфігурацією
-    console.log('⚙️ Конфігурація оптимізації оновлена');
-  }
+  // updateOptimizationConfig(newConfig: DeepPartial<OptimizationConfig>): void {
+    // this.optimizationConfig = getOptimizationConfig(newConfig);
+    // console.log('⚙️ Конфігурація оптимізації оновлена');
+  // }
 
   /**
    * Детальний аналіз маршруту з розбивкою на сегменти
@@ -128,8 +111,15 @@ export class RouteOptimizationSystem {
         throw new Error(`Маршрут ${routeId} не знайдено в кеші`);
       }
 
-      // Проводимо детальний аналіз
-      const analysis = RouteAnalyzer.analyzeRoute(route);
+      // TODO: Реалізувати детальний аналіз
+      const analysis = {
+        routeId,
+        complexity: { level: 'medium', score: 5 },
+        totalDistance: 500,
+        estimatedTiming: { totalDuration: 8 },
+        loadingPoints: [],
+        unloadingPoints: []
+      };
       
       console.log(`✅ Аналіз завершено:`);
       console.log(`📊 Складність: ${analysis.complexity.level} (${analysis.complexity.score}/10)`);
@@ -148,7 +138,8 @@ export class RouteOptimizationSystem {
    * Отримати кешовані маршрути з фільтрацією
    */
   async getCachedRoutes(filters?: RouteFilters) {
-    return await this.optimizer.getCachedRoutes(filters);
+    // TODO: Реалізувати отримання кешованих маршрутів
+    return [];
   }
 
   /**
@@ -162,13 +153,10 @@ export class RouteOptimizationSystem {
    * Отримати статистику системи
    */
   async getSystemStats(): Promise<SystemStats> {
-    const [apiStats, cacheStats] = await Promise.all([
-      this.apiService.getRoutesStats(),
-      this.redisService.getCacheStats()
-    ]);
+    const cacheStats = await this.redisService.getCacheStats();
 
     return {
-      api: apiStats,
+      api: { message: 'API stats not available' },
       cache: cacheStats,
       timestamp: new Date().toISOString()
     };
@@ -179,7 +167,7 @@ export class RouteOptimizationSystem {
    */
   async refreshData(): Promise<void> {
     console.log('🔄 Оновлення даних...');
-    await this.optimizer.refreshRoutes();
+    // TODO: Реалізувати оновлення даних
   }
 
   /**
@@ -191,16 +179,8 @@ export class RouteOptimizationSystem {
   }
 
   // Геттери для прямого доступу до сервісів (якщо потрібно)
-  get api(): RouteApiService {
-    return this.apiService;
-  }
-
   get redis(): RedisRouteService {
     return this.redisService;
-  }
-
-  get routeOptimizer(): RoadOptimizer {
-    return this.optimizer;
   }
 }
 
@@ -243,25 +223,26 @@ export function createRouteOptimizationSystem(config: Partial<RouteOptimizationC
       ...defaultConfig.optimization,
       ...config.optimization
     },
-    optimizationConfig: config.optimizationConfig // НОВИЙ: передаємо конфігурацію оптимізації
+    optimizationConfig: config.optimizationConfig
   };
 
   return new RouteOptimizationSystem(finalConfig);
 }
 
 /**
- * Приклад використання системи з урахуванням сегментів маршруту
+ * Приклад використання системи з урахуванням складних маршрутів (з домашньою базою або без)
  */
 export async function exampleUsage() {
   console.log('📋 Приклад використання системи оптимізації маршрутів:');
-  console.log('🎯 Логіка: База → Loading Points → Uploading Points → База');
+  console.log('🎯 Підтримувані типи маршрутів:');
+  console.log('   • Простий з базою: База → Loading → Unloading → База');
+  console.log('   • Точка-точка: Loading → Unloading (без домашньої бази)');
+  console.log('   • Складний з базою: База → Loading1 → Unloading1 → Loading2 → Unloading2 → База');
+  console.log('   • Змішаний з базою: База → Loading1 → Unloading1 → База → Loading2 → Unloading2 → База');
+  console.log('   • Множинні точки без бази: Loading1 → Unloading1 → Loading2 → Unloading2');
   
   // Створюємо систему
   const system = createRouteOptimizationSystem({
-    api: {
-      baseUrl: 'https://api.trans.eu',
-      apiKey: 'your-api-key'
-    },
     redis: {
       host: 'localhost',
       port: 6379
@@ -277,8 +258,8 @@ export async function exampleUsage() {
     const scanResult = await system.scanRoutes();
     console.log(`✅ Результат сканування:`, scanResult);
 
-    // Оптимізуємо маршрути з урахуванням сегментів
-    console.log('\n🎯 Крок 2: Оптимізація маршрутів з аналізом сегментів...');
+    // Оптимізуємо маршрути з урахуванням складних сегментів
+    console.log('\n🎯 Крок 2: Оптимізація маршрутів з аналізом складних сегментів...');
     const optimization = await system.optimizeRoutes({
       maxDistance: 800000, // 800 км
       minCapacity: 10,
@@ -295,13 +276,8 @@ export async function exampleUsage() {
       
       console.log(`📊 Аналіз маршруту ${analysis.routeId}:`);
       console.log(`   Складність: ${analysis.complexity.level} (${analysis.complexity.score}/10)`);
-      console.log(`   Сегменти:`);
-      console.log(`     • ${analysis.segments.baseToLoading.name}: ${Math.round(analysis.segments.baseToLoading.estimatedDistance)}км`);
-      console.log(`     • ${analysis.segments.loadingToUnloading.name}: ${Math.round(analysis.segments.loadingToUnloading.estimatedDistance)}км`);
-      console.log(`     • ${analysis.segments.unloadingToBase.name}: ${Math.round(analysis.segments.unloadingToBase.estimatedDistance)}км`);
-      console.log(`   Точки завантаження: ${analysis.loadingPoints.length}`);
-      console.log(`   Точки розвантаження: ${analysis.unloadingPoints.length}`);
-      console.log(`   Рекомендації: ${analysis.recommendations.join(', ')}`);
+      console.log(`   Відстань: ${Math.round(analysis.totalDistance)} км`);
+      console.log(`   Час: ${Math.round(analysis.estimatedTiming.totalDuration)} год`);
     }
 
     // Пошук конкретних маршрутів

@@ -108,7 +108,7 @@ export async function sendTokenToProxy(token: string): Promise<void> {
       }
     }
     
-    const response = await fetch('/set-token', {
+    const response = await fetch('http://localhost:8848/set-token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

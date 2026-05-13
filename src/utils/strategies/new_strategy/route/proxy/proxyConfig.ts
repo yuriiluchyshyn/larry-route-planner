@@ -3,6 +3,8 @@
  * Конфігурація проксі-сервера для усунення CORS та 502 помилок
  */
 
+import { API_CONFIG } from '../config/apiConfig';
+
 export interface ProxyConfig {
   port: number;
   target: string;
@@ -66,7 +68,7 @@ export const defaultProxyConfig: ProxyConfig = {
 export const proxyRoutes: ProxyRoute[] = [
   {
     path: '/api/trans',
-    target: 'https://api-platform.trans.eu', // Виправлено домен!
+    target: API_CONFIG.GEOCODER_BASE_URL,
     changeOrigin: true,
     pathRewrite: {
       '^/api/trans': ''
@@ -79,7 +81,7 @@ export const proxyRoutes: ProxyRoute[] = [
   },
   {
     path: '/api/freight-offers',
-    target: 'https://api-platform.trans.eu/app/exchange/api/rest/v2', // Виправлено домен!
+    target: `${API_CONFIG.GEOCODER_BASE_URL}/app/exchange/api/rest/v2`,
     changeOrigin: true,
     pathRewrite: {
       '^/api/freight-offers': '/freight-offers'
@@ -146,7 +148,7 @@ export function validateProxyConfig(config: ProxyConfig): boolean {
 export function createProxyUrl(
   endpoint: string, 
   params?: Record<string, any>,
-  proxyHost: string = 'http://localhost:8848' // Змінено з 7740 на 8848
+  proxyHost: string = API_CONFIG.PROXY_BASE_URL
 ): string {
   const baseUrl = `${proxyHost}/api/trans`;
   const url = new URL(endpoint, baseUrl);

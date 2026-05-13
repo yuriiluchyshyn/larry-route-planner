@@ -4,6 +4,7 @@
  */
 
 import type { FreightOffer, RouteConfig } from '../types';
+import { RoutePointType } from '../types';
 import { RouteStrategy } from '../utils/routeStrategy';
 import { convertVehicleTypesToApiCodes } from '../utils/vehicleTypeMapper';
 
@@ -98,8 +99,7 @@ export function processFiltersFromExtension(filters: any, currentConfig: RouteCo
   const baseConfig: RouteConfig = currentConfig || {
     apiUrl: '/api/trans/app/exchange/api/rest/v2/freight-offers',
     bearerToken: '',
-    loadingPoints: [],
-    unloadingPoints: [],
+    routes: [], // Новий формат - масив RoutePoint
     minWeight: 0,
     maxWeight: undefined,
     minCapacity: 0,
@@ -107,16 +107,6 @@ export function processFiltersFromExtension(filters: any, currentConfig: RouteCo
     vehicleTypes: [],
     placesMatchingType: 'cross',
     maxEmptyRunPercent: 10,
-    // maxResults видалено - виводимо всі маршрути без обмежень
-    homeBase: {
-      id: 'home',
-      locality: '',
-      postalCode: '',
-      country: '',
-      latitude: 0,
-      longitude: 0,
-      range: 50,
-    },
     includeReturnRoute: true,
     departureDate: new Date().toISOString().split('T')[0],
     returnDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
@@ -149,39 +139,79 @@ export function processFiltersFromExtension(filters: any, currentConfig: RouteCo
     });
   };
   
-  // Update loading points - ALWAYS set coords to 0 so geocoder fetches fresh from API
+  // Створюємо масив RoutePoint з усіх точок
+  const allRoutePoints: any[] = [];
+  
+  // Функція для виправлення неправильних кодів країн
+  const fixCountryCode = (countryCode: string): string => {
+    const countryCodeFixes: Record<string, string> = {
+      '33_france': '19_france', // Виправляємо неправильний код Франції
+    };
+    return countryCodeFixes[countryCode] || countryCode;
+  };
+  
+  // Додаємо loading points як LOADING_POINT
   if (filters.loadingPoints && filters.loadingPoints.length > 0) {
     const dedupedLoading = dedupe(filters.loadingPoints);
     console.log(`🚛 Extension Service: Loading points: ${filters.loadingPoints.length} from extension, ${dedupedLoading.length} after dedupe`);
-    newConfig.loadingPoints = dedupedLoading.map((point: any, index: number) => ({
+    
+    const loadingRoutePoints = dedupedLoading.map((point: any, index: number) => ({
       id: point.id || `lp${index + 1}`,
+      type: RoutePointType.LOADING_POINT,
       locality: point.locality || '',
       postalCode: point.postalCode || '',
-      country: point.country || '47_poland',
+      country: fixCountryCode(point.country || '47_poland'), // Виправляємо код країни
       latitude: 0, // Always 0 - geocoder will fill these
       longitude: 0,
       range: point.range || 50,
       extensionAddress: point.extensionAddress // Передаємо extensionAddress для геокодування
     }));
-    console.log('🚛 Extension Service: Processed loading points:', newConfig.loadingPoints);
+    
+    allRoutePoints.push(...loadingRoutePoints);
+    console.log('🚛 Extension Service: Processed loading points:', loadingRoutePoints);
   }
   
-  // Update unloading points - ALWAYS set coords to 0 so geocoder fetches fresh from API
+  // Додаємо unloading points як UNLOADING_POINT
   if (filters.unloadingPoints && filters.unloadingPoints.length > 0) {
     const dedupedUnloading = dedupe(filters.unloadingPoints);
     console.log(`🚚 Extension Service: Unloading points: ${filters.unloadingPoints.length} from extension, ${dedupedUnloading.length} after dedupe`);
-    newConfig.unloadingPoints = dedupedUnloading.map((point: any, index: number) => ({
+    
+    const unloadingRoutePoints = dedupedUnloading.map((point: any, index: number) => ({
       id: point.id || `up${index + 1}`,
+      type: RoutePointType.UNLOADING_POINT,
       locality: point.locality || '',
       postalCode: point.postalCode || '',
-      country: point.country || '21_germany',
+      country: fixCountryCode(point.country || '21_germany'), // Виправляємо код країни
       latitude: 0, // Always 0 - geocoder will fill these
       longitude: 0,
       range: point.range || 50,
       extensionAddress: point.extensionAddress // Передаємо extensionAddress для геокодування
     }));
-    console.log('🚚 Extension Service: Processed unloading points:', newConfig.unloadingPoints);
+    
+    allRoutePoints.push(...unloadingRoutePoints);
+    console.log('🚚 Extension Service: Processed unloading points:', unloadingRoutePoints);
   }
+  
+  // Додаємо домашню базу як HOME_POINT якщо є
+  if (filters.homeBase && filters.homeBase.locality) {
+    const homeRoutePoint = {
+      id: 'home',
+      type: RoutePointType.HOME_POINT,
+      locality: filters.homeBase.locality || '',
+      postalCode: filters.homeBase.postalCode || '',
+      country: fixCountryCode(filters.homeBase.country || ''), // Виправляємо код країни
+      latitude: filters.homeBase.latitude || 0,
+      longitude: filters.homeBase.longitude || 0,
+      range: filters.homeBase.range || 50,
+    };
+    
+    allRoutePoints.push(homeRoutePoint);
+    console.log('🏠 Extension Service: Processed home base:', homeRoutePoint);
+  }
+  
+  // Встановлюємо всі точки в новий формат
+  newConfig.routes = allRoutePoints;
+  console.log('🔧 Extension Service: All route points:', allRoutePoints);
   
   // Update weight with detailed logging
   if (filters.minWeight !== undefined && filters.minWeight !== null) {
@@ -219,6 +249,7 @@ export function processFiltersFromExtension(filters: any, currentConfig: RouteCo
   
   // Log final config after update
   console.log('Larry: Final config after update:', {
+    routes: newConfig.routes,
     minWeight: newConfig.minWeight,
     maxWeight: newConfig.maxWeight,
     minCapacity: newConfig.minCapacity,

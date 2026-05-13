@@ -135,13 +135,34 @@ export interface WayPoint {
   range: number;
 }
 
+// Route point types enum
+export enum RoutePointType {
+  HOME_POINT = 'homePoint',
+  LOADING_POINT = 'loadingPoint',
+  UNLOADING_POINT = 'unloadingPoint'
+}
+
+// Route point with type
+export interface RoutePoint {
+  id: string;
+  type: RoutePointType;
+  locality: string;
+  postalCode: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  range: number;
+}
+
+
 // Route planner configuration
 export interface RouteConfig {
   apiUrl: string;
   bearerToken: string;
-  // Multiple loading/unloading points
-  loadingPoints: WayPoint[];
-  unloadingPoints: WayPoint[];
+  // Route object with structured route points
+  routes: RoutePoint[];
+  // Home base (derived from routes with HOME_POINT type)
+  homeBase?: RoutePoint;
   // Filter params
   minWeight: number;
   maxWeight?: number;
@@ -153,7 +174,6 @@ export interface RouteConfig {
   // Route optimization params
   maxEmptyRunPercent: number;
   maxResults?: number; // Maximum number of routes to return (optional - no limit if not specified)
-  homeBase: WayPoint; // start/end point for the lorry
   includeReturnRoute: boolean; // fetch reverse direction offers
   // Departure & return dates
   departureDate: string; // ISO date string (YYYY-MM-DD)

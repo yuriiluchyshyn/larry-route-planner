@@ -12,9 +12,18 @@ export interface ProxyResponse<T = any> {
 
 export class ProxyClient {
   private baseUrl: string;
+  private authToken?: string;
 
-  constructor(proxyPort: number = 8848) {
+  constructor(proxyPort: number = 8848, authToken?: string) {
     this.baseUrl = `http://localhost:${proxyPort}`;
+    this.authToken = authToken;
+  }
+
+  /**
+   * Встановити токен автентифікації
+   */
+  setAuthToken(token: string): void {
+    this.authToken = token;
   }
 
   /**
@@ -44,18 +53,16 @@ export class ProxyClient {
     targetBaseUrl?: string
   ): Promise<ProxyResponse> {
     try {
-      // Визначаємо правильний базовый URL для різних ендпоінтів
+      // Визначаємо правильний URL для проксування
       let fullUrl: string;
       
-      if (endpoint.startsWith('/app/geocoder-api')) {
-        // Для геокодера використовуємо спеціальний маршрут
-        fullUrl = `${this.baseUrl}${endpoint}`;
-      } else if (endpoint.startsWith('/app/exchange/api/rest/v2')) {
-        // Для freight-offers використовуємо прямий маршрут без додавання /api/trans
-        fullUrl = `${this.baseUrl}${endpoint}`;
+      // Якщо endpoint вже містить повний шлях, використовуємо його як є
+      if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+        fullUrl = endpoint;
       } else {
-        // Загальний випадок
-        fullUrl = `${this.baseUrl}/api/trans${endpoint}`;
+        // Інакше будуємо URL через проксі, додаючи /api префікс
+        const apiEndpoint = endpoint.startsWith('/api') ? endpoint : `/api${endpoint}`;
+        fullUrl = `${this.baseUrl}${apiEndpoint}`;
       }
 
       const url = new URL(fullUrl);
@@ -63,7 +70,22 @@ export class ProxyClient {
       // Додаємо параметри до URL
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          url.searchParams.append(key, String(value));
+          // Для JSON параметрів (filter, sort, counters) використовуємо set замість append
+          // щоб уникнути подвійного кодування
+          if (key === 'filter' || key === 'sort' || key === 'counters') {
+            // Перевіряємо чи це вже JSON string
+            const stringValue = String(value);
+            try {
+              // Якщо це валідний JSON, використовуємо його як є
+              JSON.parse(stringValue);
+              url.searchParams.set(key, stringValue);
+            } catch {
+              // Якщо це не JSON, додаємо як звичайний параметр
+              url.searchParams.set(key, stringValue);
+            }
+          } else {
+            url.searchParams.set(key, String(value));
+          }
         }
       });
 
@@ -74,11 +96,25 @@ export class ProxyClient {
 
       console.log('🔧 ProxyClient - проксуємо запит:', url.toString());
 
+      // Формуємо заголовки
+      const headers: Record<string, string> = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9,uk;q=0.8,pl;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      };
+
+      // Додаємо токен автентифікації якщо є
+      if (this.authToken) {
+        headers['Authorization'] = `Bearer ${this.authToken}`;
+        console.log('🔑 Додано Authorization header з JWT токеном');
+      }
+
       const response = await fetch(url.toString(), {
         method: method.toUpperCase(),
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers,
         signal: AbortSignal.timeout(30000)
       });
 
@@ -109,6 +145,6 @@ export class ProxyClient {
 /**
  * Створити простий проксі клієнт
  */
-export function createProxyClient(proxyPort?: number): ProxyClient {
-  return new ProxyClient(proxyPort);
+export function createProxyClient(proxyPort?: number, authToken?: string): ProxyClient {
+  return new ProxyClient(proxyPort, authToken);
 }

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { MapModal } from './MapModal';
-import { reverseGeocode } from '../utils/geocode';
-import { getAvailableStrategies, getStrategyInfo, RouteStrategy, legacyToStrategy, strategyToLegacy } from '../utils/routeStrategy';
-import { isInExtensionContext } from '../services/extensionService';
+// import { reverseGeocode } from '../utils/geocode';
+import { legacyToStrategy, RouteStrategy } from '../utils/routeStrategy';
+import { isInExtensionContext, requestTokenFromExtension, requestFiltersFromExtension } from '../services/extensionService';
 import type { RouteConfig, WayPoint } from '../types';
+import { reverseGeocode } from '../utils/geocode';
 
 interface ConfigPanelProps {
   config: RouteConfig | null;
@@ -33,10 +34,6 @@ function loadConfig(): Partial<RouteConfig> | null {
     console.warn('Failed to load config from localStorage:', error);
     return null;
   }
-}
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 9);
 }
 
 // Функція для отримання читабельної назви країни
@@ -255,177 +252,38 @@ export function ConfigPanel({
     onChange({ ...config, [field]: value });
   };
 
-  const addLoadingPoint = () => {
-    const newPoint: WayPoint = {
-      id: generateId(),
-      locality: '',
-      postalCode: '',
-      country: '47_poland',
-      latitude: 50.0,
-      longitude: 20.0,
-      range: 50,
-    };
-    
-    // Also add corresponding unloading point
-    const newUnloadingPoint: WayPoint = {
-      id: generateId(),
-      locality: '',
-      postalCode: '',
-      country: '21_germany',
-      latitude: 52.0,
-      longitude: 13.0,
-      range: 50,
-    };
-    
-    onChange({
-      ...config,
-      loadingPoints: [...config.loadingPoints, newPoint],
-      unloadingPoints: [...config.unloadingPoints, newUnloadingPoint],
-    });
-  };
-
-  const addUnloadingPoint = () => {
-    const newPoint: WayPoint = {
-      id: generateId(),
-      locality: '',
-      postalCode: '',
-      country: '21_germany',
-      latitude: 52.0,
-      longitude: 13.0,
-      range: 50,
-    };
-    
-    // Also add corresponding loading point
-    const newLoadingPoint: WayPoint = {
-      id: generateId(),
-      locality: '',
-      postalCode: '',
-      country: '47_poland',
-      latitude: 50.0,
-      longitude: 20.0,
-      range: 50,
-    };
-    
-    onChange({
-      ...config,
-      unloadingPoints: [...config.unloadingPoints, newPoint],
-      loadingPoints: [...config.loadingPoints, newLoadingPoint],
-    });
-  };
-
-  const updateLoadingPoint = (idx: number, point: WayPoint) => {
-    const updated = [...config.loadingPoints];
-    updated[idx] = point;
-    const newConfig = { ...config, loadingPoints: updated };
-    
-    // Auto-update home base if it matches the first loading point
-    if (idx === 0 && config.homeBase.id === config.loadingPoints[0]?.id) {
-      newConfig.homeBase = { ...point };
-    }
-    
-    onChange(newConfig);
-  };
-
-  const updateUnloadingPoint = (idx: number, point: WayPoint) => {
-    const updated = [...config.unloadingPoints];
-    updated[idx] = point;
-    onChange({ ...config, unloadingPoints: updated });
-  };
-
-  const removeLoadingPoint = (idx: number) => {
-    const updated = config.loadingPoints.filter((_, i) => i !== idx);
-    // Also remove corresponding unloading point if exists
-    const updatedUnloading = config.unloadingPoints.filter((_, i) => i !== idx);
-    onChange({ 
-      ...config, 
-      loadingPoints: updated,
-      unloadingPoints: updatedUnloading.length > 0 ? updatedUnloading : config.unloadingPoints
-    });
-  };
-
-  const removeUnloadingPoint = (idx: number) => {
-    const updated = config.unloadingPoints.filter((_, i) => i !== idx);
-    // Also remove corresponding loading point if exists
-    const updatedLoading = config.loadingPoints.filter((_, i) => i !== idx);
-    onChange({ 
-      ...config, 
-      unloadingPoints: updated,
-      loadingPoints: updatedLoading.length > 0 ? updatedLoading : config.loadingPoints
-    });
-  };
-
   const handleMapSelect = async (lat: number, lon: number) => {
     if (!mapModal) return;
     const geo = await reverseGeocode(lat, lon);
 
     if (mapModal.type === 'home') {
-      // Update home base
-      onChange({
-        ...config,
-        homeBase: {
-          ...config.homeBase,
-          latitude: lat,
-          longitude: lon,
-          locality: geo.locality || config.homeBase.locality,
-          postalCode: geo.postalCode || config.homeBase.postalCode,
-          country: geo.country || config.homeBase.country,
-        }
-      });
-    } else if (mapModal.type === 'loading') {
-      if (mapModal.index !== null) {
-        // Update existing point
-        const updated = [...config.loadingPoints];
-        updated[mapModal.index] = {
-          ...updated[mapModal.index],
-          latitude: lat,
-          longitude: lon,
-          locality: geo.locality || updated[mapModal.index].locality,
-          postalCode: geo.postalCode || updated[mapModal.index].postalCode,
-          country: geo.country || updated[mapModal.index].country,
-        };
-        onChange({ ...config, loadingPoints: updated });
+      // Update home base in routes array
+      const homePoint = config.routes?.find(r => r.type === 'homePoint');
+      if (homePoint) {
+        const updatedRoutes = config.routes.map(r => 
+          r.type === 'homePoint' ? {
+            ...r,
+            latitude: lat,
+            longitude: lon,
+            locality: geo.locality || r.locality,
+            postalCode: geo.postalCode || r.postalCode,
+            country: geo.country || r.country,
+          } : r
+        );
+        onChange({ ...config, routes: updatedRoutes });
       } else {
-        // Add new point
-        const newPoint: WayPoint = {
-          id: generateId(),
-          locality: geo.locality,
-          postalCode: geo.postalCode,
-          country: geo.country,
+        // Створюємо нову домашню точку якщо її немає
+        const newHome = {
+          id: 'home-base',
+          type: 'homePoint' as const,
+          locality: geo.locality || '',
+          postalCode: geo.postalCode || '',
+          country: geo.country || '',
           latitude: lat,
           longitude: lon,
-          range: 50,
+          range: 50
         };
-        onChange({
-          ...config,
-          loadingPoints: [...config.loadingPoints, newPoint],
-        });
-      }
-    } else {
-      if (mapModal.index !== null) {
-        const updated = [...config.unloadingPoints];
-        updated[mapModal.index] = {
-          ...updated[mapModal.index],
-          latitude: lat,
-          longitude: lon,
-          locality: geo.locality || updated[mapModal.index].locality,
-          postalCode: geo.postalCode || updated[mapModal.index].postalCode,
-          country: geo.country || updated[mapModal.index].country,
-        };
-        onChange({ ...config, unloadingPoints: updated });
-      } else {
-        const newPoint: WayPoint = {
-          id: generateId(),
-          locality: geo.locality,
-          postalCode: geo.postalCode,
-          country: geo.country,
-          latitude: lat,
-          longitude: lon,
-          range: 50,
-        };
-        onChange({
-          ...config,
-          unloadingPoints: [...config.unloadingPoints, newPoint],
-        });
+        onChange({ ...config, routes: [...(config.routes || []), newHome] });
       }
     }
 
@@ -487,7 +345,7 @@ export function ConfigPanel({
                   type="button"
                   onClick={() => {
                     console.log('Larry: Manually requesting token from extension...');
-                    window.parent.postMessage({ type: 'REQUEST_TOKEN' }, '*');
+                    requestTokenFromExtension();
                   }}
                   style={{
                     padding: '6px 12px',
@@ -503,12 +361,33 @@ export function ConfigPanel({
                   🔄 Запросити токен
                 </button>
               )}
+              {config.bearerToken && isInExtensionContext() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log('Larry: Refreshing token from extension...');
+                    requestTokenFromExtension();
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    border: '1px solid #17a2b8',
+                    borderRadius: '4px',
+                    background: '#17a2b8',
+                    color: 'white',
+                    cursor: 'pointer'
+                  }}
+                  title="Оновити токен з platform.trans.eu"
+                >
+                  🔄 Refresh Token
+                </button>
+              )}
               {isInExtensionContext() && (
                 <button
                   type="button"
                   onClick={() => {
                     console.log('Larry: Requesting filters from extension...');
-                    window.parent.postMessage({ type: 'REQUEST_FILTERS' }, '*');
+                    requestFiltersFromExtension();
                   }}
                   style={{
                     padding: '6px 12px',
@@ -550,9 +429,9 @@ export function ConfigPanel({
               <strong>Extension Mode:</strong> Loading and unloading points are automatically extracted from the Trans.eu platform.
               <br/>
               <strong>Current Points:</strong>
-              {config?.loadingPoints?.length > 0 && (
+              {config?.routes?.filter(p => p.type === 'loadingPoint').length > 0 && (
                 <div style={{ marginTop: '8px' }}>
-                  <strong>Loading:</strong> {config.loadingPoints.map(p => {
+                  <strong>Loading:</strong> {config.routes.filter(p => p.type === 'loadingPoint').map(p => {
                     // Якщо locality порожній, але є country - показуємо країну
                     const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
                     const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
@@ -560,9 +439,9 @@ export function ConfigPanel({
                   }).join(', ')}
                 </div>
               )}
-              {config?.unloadingPoints?.length > 0 && (
+              {config?.routes?.filter(p => p.type === 'unloadingPoint').length > 0 && (
                 <div style={{ marginTop: '4px' }}>
-                  <strong>Unloading:</strong> {config.unloadingPoints.map(p => {
+                  <strong>Unloading:</strong> {config.routes.filter(p => p.type === 'unloadingPoint').map(p => {
                     // Якщо locality порожній, але є country - показуємо країну
                     const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
                     const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
@@ -570,7 +449,16 @@ export function ConfigPanel({
                   }).join(', ')}
                 </div>
               )}
-              {(!config?.loadingPoints?.length && !config?.unloadingPoints?.length) && (
+              {config?.routes?.filter(p => p.type === 'homePoint').length > 0 && (
+                <div style={{ marginTop: '4px' }}>
+                  <strong>Home Base:</strong> {config.routes.filter(p => p.type === 'homePoint').map(p => {
+                    const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
+                    const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
+                    return `${displayName} (${postalInfo}) - ${p.range || 50}km`;
+                  }).join(', ')}
+                </div>
+              )}
+              {(!config?.routes?.length) && (
                 <div style={{ marginTop: '8px', color: '#ff6b6b' }}>
                   ⚠️ No points detected. Make sure you have selected locations on the Trans.eu platform.
                 </div>
@@ -589,105 +477,7 @@ export function ConfigPanel({
         </section>
       )}
 
-      {/* Loading Points - приховано в Extension контексті */}
-      {!isInExtensionContext() && (
-      <section className="config-section">
-        <h3 onClick={() => toggleSection('loading')} className="collapsible-header">
-          📍 Loading Points (Pickup Locations)
-          <span className="collapse-icon">{collapsed.loading ? '▶' : '▼'}</span>
-          <div className="section-actions">
-            <button
-              className="add-btn"
-              onClick={() =>
-                setMapModal({ type: 'loading', index: null })
-              }
-              title="Pick on map"
-            >
-              🗺️ Map
-            </button>
-            <button className="add-btn" onClick={addLoadingPoint}>
-              + Add
-            </button>
-          </div>
-        </h3>
-        {!collapsed.loading && (
-          <div className="section-content">
-        <div className="help-text">
-          <strong>Loading Points:</strong> Intermediate locations where Larry can pick up cargo during the route.
-          <br/><strong>Note:</strong> Adding a loading point automatically adds a corresponding unloading point.
-        </div>
-        {config.loadingPoints.map((point, idx) => (
-          <WayPointEditor
-            key={point.id}
-            point={point}
-            onChange={(p) => updateLoadingPoint(idx, p)}
-            onRemove={() => removeLoadingPoint(idx)}
-            onPickMap={() =>
-              setMapModal({
-                type: 'loading',
-                index: idx,
-                initialLat: point.latitude,
-                initialLon: point.longitude,
-              })
-            }
-            canRemove={config.loadingPoints.length > 1}
-            label={`Loading #${idx + 1}`}
-          />
-        ))}
-        </div>
-        )}
-      </section>
-      )}
-
-      {/* Unloading Points - приховано в Extension контексті */}
-      {!isInExtensionContext() && (
-      <section className="config-section">
-        <h3 onClick={() => toggleSection('unloading')} className="collapsible-header">
-          📍 Unloading Points (Delivery Locations)
-          <span className="collapse-icon">{collapsed.unloading ? '▶' : '▼'}</span>
-          <div className="section-actions">
-            <button
-              className="add-btn"
-              onClick={() =>
-                setMapModal({ type: 'unloading', index: null })
-              }
-              title="Pick on map"
-            >
-              🗺️ Map
-            </button>
-            <button className="add-btn" onClick={addUnloadingPoint}>
-              + Add
-            </button>
-          </div>
-        </h3>
-        {!collapsed.unloading && (
-          <div className="section-content">
-        <div className="help-text">
-          <strong>Unloading Points:</strong> Intermediate locations where Larry can deliver cargo during the route.
-          <br/><strong>Note:</strong> Adding an unloading point automatically adds a corresponding loading point.
-        </div>
-        {config.unloadingPoints.map((point, idx) => (
-          <WayPointEditor
-            key={point.id}
-            point={point}
-            onChange={(p) => updateUnloadingPoint(idx, p)}
-            onRemove={() => removeUnloadingPoint(idx)}
-            onPickMap={() =>
-              setMapModal({
-                type: 'unloading',
-                index: idx,
-                initialLat: point.latitude,
-                initialLon: point.longitude,
-              })
-            }
-            canRemove={config.unloadingPoints.length > 1}
-            label={`Unloading #${idx + 1}`}
-          />
-        ))}
-        </div>
-        )}
-      </section>
-      )}
+      {/* Loading and Unloading Points sections removed - managed by Extension */}
 
       <section className="config-section">
         <h3 onClick={() => toggleSection('homebase')} className="collapsible-header">
@@ -704,14 +494,10 @@ export function ConfigPanel({
           <label>
             <input
               type="checkbox"
-              checked={config.homeBase.id === config.loadingPoints[0]?.id}
-              onChange={(e) => {
-                if (e.target.checked && config.loadingPoints.length > 0) {
-                  onChange({ ...config, homeBase: { ...config.loadingPoints[0] } });
-                }
-              }}
+              checked={false}
+              disabled={true}
             />
-            Use first loading point as home base
+            Use first loading point as home base (Extension mode - managed automatically)
           </label>
         </div>
         <div className="field-row">
@@ -719,13 +505,29 @@ export function ConfigPanel({
             <label>Home City</label>
             <input
               type="text"
-              value={config.homeBase.locality}
-              onChange={(e) => 
-                onChange({ 
-                  ...config, 
-                  homeBase: { ...config.homeBase, locality: e.target.value }
-                })
-              }
+              value={config.routes?.find(r => r.type === 'homePoint')?.locality || ''}
+              onChange={(e) => {
+                const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                if (homePoint) {
+                  const updatedRoutes = config.routes.map(r => 
+                    r.type === 'homePoint' ? { ...r, locality: e.target.value } : r
+                  );
+                  onChange({ ...config, routes: updatedRoutes });
+                } else {
+                  // Створюємо нову домашню точку
+                  const newHome = {
+                    id: 'home-base',
+                    type: 'homePoint' as const,
+                    locality: e.target.value,
+                    postalCode: '',
+                    country: '',
+                    latitude: 0,
+                    longitude: 0,
+                    range: 50
+                  };
+                  onChange({ ...config, routes: [...(config.routes || []), newHome] });
+                }
+              }}
             />
           </div>
           <div className="field">
@@ -733,13 +535,16 @@ export function ConfigPanel({
             <input
               type="number"
               step="0.000001"
-              value={config.homeBase.latitude}
-              onChange={(e) =>
-                onChange({ 
-                  ...config, 
-                  homeBase: { ...config.homeBase, latitude: parseFloat(e.target.value) || 0 }
-                })
-              }
+              value={config.routes?.find(r => r.type === 'homePoint')?.latitude || 0}
+              onChange={(e) => {
+                const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                if (homePoint) {
+                  const updatedRoutes = config.routes.map(r => 
+                    r.type === 'homePoint' ? { ...r, latitude: parseFloat(e.target.value) || 0 } : r
+                  );
+                  onChange({ ...config, routes: updatedRoutes });
+                }
+              }}
             />
           </div>
           <div className="field">
@@ -747,27 +552,31 @@ export function ConfigPanel({
             <input
               type="number"
               step="0.000001"
-              value={config.homeBase.longitude}
-              onChange={(e) =>
-                onChange({ 
-                  ...config, 
-                  homeBase: { ...config.homeBase, longitude: parseFloat(e.target.value) || 0 }
-                })
-              }
+              value={config.routes?.find(r => r.type === 'homePoint')?.longitude || 0}
+              onChange={(e) => {
+                const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                if (homePoint) {
+                  const updatedRoutes = config.routes.map(r => 
+                    r.type === 'homePoint' ? { ...r, longitude: parseFloat(e.target.value) || 0 } : r
+                  );
+                  onChange({ ...config, routes: updatedRoutes });
+                }
+              }}
             />
           </div>
         </div>
         <div className="field">
           <button
             className="pick-map-btn"
-            onClick={() =>
+            onClick={() => {
+              const homePoint = config.routes?.find(r => r.type === 'homePoint');
               setMapModal({
                 type: 'home',
                 index: null,
-                initialLat: config.homeBase.latitude,
-                initialLon: config.homeBase.longitude,
-              })
-            }
+                initialLat: homePoint?.latitude || 50.06,
+                initialLon: homePoint?.longitude || 19.94,
+              });
+            }}
             title="Pick home base on map"
             style={{ width: '100%', padding: '8px' }}
           >
@@ -778,7 +587,7 @@ export function ConfigPanel({
         )}
       </section>
 
-      <section className="config-section">
+      {/* <section className="config-section">
         <h3 onClick={() => toggleSection('filters')} className="collapsible-header">
           ⚙️ Filter Parameters
           <span className="collapse-icon">{collapsed.filters ? '▶' : '▼'}</span>
@@ -859,7 +668,7 @@ export function ConfigPanel({
         </div>
         </div>
         )}
-      </section>
+      </section> */}
 
       <section className="config-section">
         <h3 onClick={() => toggleSection('optimization')} className="collapsible-header">
@@ -870,7 +679,7 @@ export function ConfigPanel({
           <div className="section-content">
         
         {/* Route Strategy Selection */}
-        <div className="field">
+        {/* <div className="field">
           <label htmlFor="routeStrategy">🎯 Стратегія оптимізації</label>
           <select
             id="routeStrategy"
@@ -922,7 +731,7 @@ export function ConfigPanel({
               </div>
             );
           })()}
-        </div>
+        </div> */}
         
         {/* Legacy checkbox for backward compatibility */}
         <div className="field checkbox-field" style={{ display: 'none' }}>
@@ -1089,10 +898,10 @@ export function ConfigPanel({
       <button 
         className="fetch-btn" 
         onClick={onFetch} 
-        disabled={loading || !config.loadingPoints?.length || !config.unloadingPoints?.length}
+        disabled={loading || !config?.routes?.length}
       >
         {loading ? '⏳ Loading...' : 
-         !config.loadingPoints?.length || !config.unloadingPoints?.length ? '⚠️ Додайте точки завантаження та розвантаження' :
+         !config.routes?.length ? '⚠️ Додайте точки завантаження та розвантаження' :
          '🔍 Fetch & Optimize Routes'}
       </button>
 

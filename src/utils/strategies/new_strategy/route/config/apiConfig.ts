@@ -12,7 +12,9 @@ export const API_CONFIG = {
   // Endpoints
   ENDPOINTS: {
     FREIGHT_OFFERS: '/app/exchange/api/rest/v2/freight-offers',
-    GEOCODER: '/app/geocoder-api/api/v2/locations',
+    GEOCODER_LOCATIONS: '/app/geocoder-api/api/v2/locations',
+    GEOCODER_REVERSE: '/app/geocoder-api/api/v2/reverse',
+    GEOCODER_SUGGEST: '/app/geocoder-api/api/v2/suggest',
     HEALTH: '/health',
     STATUS: '/status'
   },
@@ -41,11 +43,20 @@ export const API_CONFIG = {
 };
 
 export const TRANSEU_CONFIG = {
-  // Countries
+  // Countries - ВИПРАВЛЕНІ КОДИ КРАЇН
   COUNTRIES: {
     POLAND: '47_poland',
-    GERMANY: '47_germany',
-    UKRAINE: '47_ukraine'
+    GERMANY: '21_germany', 
+    UKRAINE: '380_ukraine',
+    FRANCE: '19_france', // ВИПРАВЛЕНО: було 33_france
+    CZECH_REPUBLIC: '420_czech_republic',
+    AUSTRIA: '43_austria',
+    SLOVAKIA: '421_slovakia',
+    HUNGARY: '36_hungary',
+    ITALY: '39_italy',
+    SPAIN: '34_spain',
+    NETHERLANDS: '31_netherlands',
+    BELGIUM: '32_belgium'
   },
   
   // Geocoder configuration

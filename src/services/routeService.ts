@@ -3,7 +3,7 @@
  * Сервіс для роботи з маршрутами та оптимізацією
  */
 
-import { fetchFreightOffers } from '../utils/strategies/new_strategy/route/routeApiService';
+import { fetchFreightOffers } from '../utils/services/ApiTransService.compatibility';
 import { executeRouteOptimization, legacyToStrategy, RouteStrategy } from '../utils/routeStrategy';
 import type { FreightOffer, OptimizedRoute, RouteConfig } from '../types';
 
@@ -23,23 +23,12 @@ export interface RouteOptimizationParams {
 }
 
 export interface FetchOffersResult {
-  mainOffers: FreightOffer[];
-  returnOffers: FreightOffer[];
-}
-
-/**
- * Завантажити пропозиції з API
- */
-export async function fetchOffers(config: RouteConfig): Promise<FetchOffersResult> {
-  const response = await fetchFreightOffers(config);
-  return {
-    mainOffers: response.mainOffers || [],
-    returnOffers: response.returnOffers || []
-  };
+  offers: FreightOffer[];
 }
 
 /**
  * Оптимізувати маршрути
+ * Домашня база використовується як початкова і кінцева точка тільки якщо вона задана
  */
 export async function optimizeRoutes(
   offers: FetchOffersResult,
@@ -47,11 +36,18 @@ export async function optimizeRoutes(
   params: Partial<RouteOptimizationParams> = {}
 ): Promise<OptimizedRoute[]> {
   const home = config.homeBase;
-  // Use first loading point as home base if homeBase is not properly set
-  const homeBase = config.loadingPoints.length > 0 && 
-    (home.latitude === 0 || home.longitude === 0) 
-    ? config.loadingPoints[0] 
-    : home;
+  
+  // Перевіряємо чи домашня база задана
+  const hasHomeBase = home && 
+                     home.locality && 
+                     home.latitude !== 0 && 
+                     home.longitude !== 0;
+  
+  if (hasHomeBase) {
+    console.log(`🏠 Домашня база для оптимізації: ${home.locality} (${home.country}) [${home.latitude}, ${home.longitude}]`);
+  } else {
+    console.log(`📍 Домашня база не задана - оптимізація без прив'язки до домашньої точки`);
+  }
   
   // Determine strategy (support both legacy and new system)
   const strategy = config.routeStrategy 
@@ -63,8 +59,9 @@ export async function optimizeRoutes(
   const optimizationParams = {
     strategy,
     maxEmptyRunPercent: config.maxEmptyRunPercent,
-    homeBaseLat: homeBase.latitude,
-    homeBaseLon: homeBase.longitude,
+    // Використовуємо домашню базу тільки якщо вона задана, інакше використовуємо першу точку завантаження
+    homeBaseLat: hasHomeBase ? home.latitude : (config.loadingPoints[0]?.latitude || 0),
+    homeBaseLon: hasHomeBase ? home.longitude : (config.loadingPoints[0]?.longitude || 0),
     departureDate: config.departureDate,
     returnDate: config.returnDate,
     averageSpeedKmh: config.averageSpeedKmh,
@@ -77,11 +74,18 @@ export async function optimizeRoutes(
   
   try {
     const optimized = await executeRouteOptimization(
-      { mainOffers: offers.mainOffers, returnOffers: offers.returnOffers },
+      { mainOffers: offers.offers, returnOffers: [] }, // Всі offers тепер в одному списку
       optimizationParams
     );
     
     console.log(`🎯 Strategy: ${strategy} returned ${optimized.length} routes`);
+    
+    if (hasHomeBase) {
+      console.log(`🏠 Всі маршрути починаються і закінчуються в: ${home.locality} (${home.country})`);
+    } else {
+      console.log(`📍 Маршрути оптимізовані без прив'язки до домашньої бази`);
+    }
+    
     return optimized;
   } catch (error) {
     console.error('Route optimization failed:', error);
@@ -92,13 +96,3 @@ export async function optimizeRoutes(
   }
 }
 
-/**
- * Отримати домашню базу з конфігурації
- */
-export function getHomeBase(config: RouteConfig) {
-  const home = config.homeBase;
-  return config.loadingPoints.length > 0 && 
-    (home.latitude === 0 || home.longitude === 0) 
-    ? config.loadingPoints[0] 
-    : home;
-}

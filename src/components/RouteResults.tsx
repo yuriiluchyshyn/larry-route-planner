@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import type { OptimizedRoute, RouteSegment, WayPoint } from '../types';
+import type { OptimizedRoute, RouteSegment, RoutePoint } from '../types';
 import { RouteMapModal } from './RouteMapModal';
 import { TranseuRouteInfo } from './TranseuRouteInfo';
 import { EU_DRIVING_RULES } from '../utils/euRules';
 
 interface RouteResultsProps {
   routes: OptimizedRoute[];
-  homeBase: WayPoint;
+  homeBase: RoutePoint; // Змінено з WayPoint на RoutePoint
   pricePerKm: number; // EUR per km for earnings calculation
 }
 

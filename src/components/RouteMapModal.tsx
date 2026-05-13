@@ -264,7 +264,7 @@ export function RouteMapModal({
       idx: number;
     }[] = [];
 
-    const home: [number, number] = [homeBase.latitude, homeBase.longitude];
+    const home: [number, number] = [homeBase?.latitude || 0, homeBase?.longitude || 0];
     const allPts: [number, number][] = [home];
 
     // Detect cyclic route (same offer repeated)
@@ -504,11 +504,11 @@ export function RouteMapModal({
             ))}
 
             {/* Home base marker */}
-            <Marker position={[homeBase.latitude, homeBase.longitude]} icon={homeIcon}>
+            <Marker position={[homeBase?.latitude || 0, homeBase?.longitude || 0]} icon={homeIcon}>
               <Popup>
                 <strong>🏠 Home Base</strong>
                 <br />
-                {homeBase.locality}
+                {homeBase?.locality || 'Unknown'}
               </Popup>
             </Marker>
 

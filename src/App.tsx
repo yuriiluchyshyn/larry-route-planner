@@ -6,15 +6,16 @@ import { RouteResults } from './components/RouteResults';
 import { FinanceButton } from './components/FinanceButton';
 import { ErrorBanner } from './components/StatusMessages/ErrorBanner';
 import { StatusMessage } from './components/StatusMessages/StatusMessage';
-import { TranseuProgressBar } from './components/ProgressBar/TranseuProgressBar';
 import { TabsContainer, type TabType } from './components/Tabs/TabsContainer';
 
 import { useExtensionMessaging } from './hooks/useExtensionMessaging';
 import { useRouteManagement } from './hooks/useRouteManagement';
 import { searchOfferOnMainPage, isInExtensionContext } from './services/extensionService';
 import { getBearerTokenFromStorage, getTokenFromUrl } from './services/tokenService';
+import SearchProgressBar from './components/SearchProgressBar';
 import { exportOffersToCSV, exportRoutesToCSV, generateTimestampedFilename } from './utils/csvExport';
 import type { FreightOffer, RouteConfig } from './types';
+import { RoutePointType } from './types';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -31,10 +32,10 @@ function App() {
       const urlToken = getTokenFromUrl();
       if (urlToken) {
         console.log('Larry: Token found in URL parameters');
-        setConfig(prev => ({ 
-          ...(prev || {}), 
+        setConfig(prev => prev ? { 
+          ...prev, 
           bearerToken: urlToken 
-        } as RouteConfig));
+        } : null);
         return;
       }
       
@@ -42,10 +43,10 @@ function App() {
       const storageToken = getBearerTokenFromStorage();
       if (storageToken) {
         console.log('Larry: Token found in localStorage');
-        setConfig(prev => ({ 
-          ...(prev || {}), 
+        setConfig(prev => prev ? { 
+          ...prev, 
           bearerToken: storageToken 
-        } as RouteConfig));
+        } : null);
         return;
       }
       
@@ -57,19 +58,14 @@ function App() {
 
   // Route management hook
   const {
-    mainOffers,
-    returnOffers,
+    offers,
     routes,
     loading,
-    optimizing,
     error,
     aiStatus,
-    transeuProgress,
-    aiPaginationMeta,
-    loadingMore,
+    searchProgress,
     handleFetch,
-    handleReoptimize,
-    handleLoadMore,
+    handleOptimizeRoutes, // Додаємо новий метод
   } = useRouteManagement({ config });
 
   // Extension messaging hook
@@ -78,10 +74,10 @@ function App() {
     onConfigChange: setConfig,
     onTokenReceived: (token) => {
       console.log('Larry: Received token from extension, updating config');
-      setConfig(prev => ({ 
-        ...(prev || {}), 
+      setConfig(prev => prev ? { 
+        ...prev, 
         bearerToken: token 
-      } as RouteConfig));
+      } : null);
     },
     onSearchStatusChange: setSearchStatus,
   });
@@ -105,13 +101,8 @@ function App() {
 
   // Export functions
   const handleExportOffers = () => {
-    const filename = generateTimestampedFilename('larry-main-offers');
-    exportOffersToCSV(mainOffers, filename);
-  };
-
-  const handleExportReturnOffers = () => {
-    const filename = generateTimestampedFilename('larry-return-offers');
-    exportOffersToCSV(returnOffers, filename);
+    const filename = generateTimestampedFilename('larry-all-offers');
+    exportOffersToCSV(offers, filename);
   };
 
   const handleExportRoutes = () => {
@@ -119,7 +110,7 @@ function App() {
     exportRoutesToCSV(routes, filename);
   };
 
-  const hasOffers = mainOffers.length > 0 || returnOffers.length > 0;
+  const hasOffers = offers.length > 0;
 
   return (
     <div className="app">
@@ -143,65 +134,48 @@ function App() {
         {searchStatus && <StatusMessage message={searchStatus} />}
         
         {aiStatus && <StatusMessage message={aiStatus} />}
+        
+        {searchProgress && (
+          <SearchProgressBar
+            current={searchProgress.current}
+            total={searchProgress.total}
+            currentRoute={searchProgress.currentRoute}
+            phase={searchProgress.phase}
+          />
+        )}
 
         <TabsContainer
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          mainOffersCount={mainOffers.length}
-          returnOffersCount={returnOffers.length}
+          allOffersCount={offers.length}
           routesCount={routes.length}
           loading={loading}
-          optimizing={optimizing}
-          includeReturnRoute={config?.includeReturnRoute || false}
+          optimizing={false}
           hasOffers={hasOffers}
           onExportOffers={handleExportOffers}
-          onExportReturnOffers={handleExportReturnOffers}
           onExportRoutes={handleExportRoutes}
-          onReoptimize={handleReoptimize}
+          onReoptimize={handleOptimizeRoutes}
         />
 
         {activeTab === 'offers' && (
-          <OffersTable offers={mainOffers} onRowClick={handleOfferRowClick} />
-        )}
-        
-        {activeTab === 'return' && (
-          <OffersTable offers={returnOffers} onRowClick={handleOfferRowClick} />
+          <OffersTable offers={offers} onRowClick={handleOfferRowClick} />
         )}
         
         {activeTab === 'routes' && (
-          <>
-            {transeuProgress && <TranseuProgressBar progress={transeuProgress} />}
-            
-            <RouteResults 
-              routes={routes} 
-              homeBase={config?.homeBase}
-              pricePerKm={config?.pricePerKm}
-            />
-            
-            {aiPaginationMeta?.nextPagePrompt && (
-              <div style={{ textAlign: 'center', padding: '16px', borderTop: '1px solid #e0e0e0' }}>
-                <div style={{ marginBottom: '8px', fontSize: '0.9em', color: '#666' }}>
-                  Показано {routes.length} з {aiPaginationMeta.totalRoutesFound} маршрутів
-                </div>
-                <button
-                  onClick={handleLoadMore}
-                  disabled={loadingMore}
-                  style={{
-                    padding: '10px 24px',
-                    fontSize: '1em',
-                    backgroundColor: loadingMore ? '#ccc' : '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: loadingMore ? 'not-allowed' : 'pointer',
-                    transition: 'background-color 0.2s',
-                  }}
-                >
-                  {loadingMore ? '⏳ Завантаження...' : '📥 Завантажити ще'}
-                </button>
-              </div>
-            )}
-          </>
+          <RouteResults 
+            routes={routes} 
+            homeBase={config?.routes?.find(point => point.type === RoutePointType.HOME_POINT) || { 
+              id: 'default-home', 
+              type: RoutePointType.HOME_POINT,
+              locality: 'Unknown', 
+              postalCode: '', 
+              country: '', 
+              latitude: 0, 
+              longitude: 0, 
+              range: 0 
+            }}
+            pricePerKm={config?.pricePerKm || 1.5}
+          />
         )}
       </main>
     </div>

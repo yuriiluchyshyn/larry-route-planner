@@ -7,34 +7,34 @@
  * Мапінг українських назв типів транспорту в API коди
  */
 export const VEHICLE_TYPE_MAPPING: Record<string, string> = {
-  // Українські назви -> API коди
+  // Українські назви -> API коди (ВИПРАВЛЕНІ ТИПИ)
   'з напівпричепом': '2_double_trailer',
   'Вантажівка(3.5т - 12т)': '3_lorry', 
   'Бус': '1_van',
-  'з причепом': '4_truck_trailer',
+  'з причепом': '5_solo', // ВИПРАВЛЕНО: було 4_truck_trailer
   
   // Додаткові варіанти написання
   'з напiвпричепом': '2_double_trailer',
   'Вантажiвка(3.5т - 12т)': '3_lorry',
-  'з причiпом': '4_truck_trailer',
+  'з причiпом': '5_solo', // ВИПРАВЛЕНО: було 4_truck_trailer
   
   // Англійські назви (якщо будуть)
   'with semi-trailer': '2_double_trailer',
   'Truck(3.5t - 12t)': '3_lorry',
   'Van': '1_van',
-  'with trailer': '4_truck_trailer',
+  'with trailer': '5_solo', // ВИПРАВЛЕНО: було 4_truck_trailer
   
   // Німецькі назви (якщо будуть)
   'mit Sattelanhänger': '2_double_trailer',
   'LKW(3.5t - 12t)': '3_lorry',
   'Transporter': '1_van',
-  'mit Anhänger': '4_truck_trailer',
+  'mit Anhänger': '5_solo', // ВИПРАВЛЕНО: було 4_truck_trailer
   
   // Польські назви (якщо будуть)
   'z naczepą': '2_double_trailer',
   'Ciężarówka(3.5t - 12t)': '3_lorry',
   'Bus': '1_van',
-  'z przyczepą': '4_truck_trailer'
+  'z przyczepą': '5_solo' // ВИПРАВЛЕНО: було 4_truck_trailer
 };
 
 /**

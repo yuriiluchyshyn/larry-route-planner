@@ -1023,7 +1023,7 @@
     const countryMap = {
       'PL': '47_poland',
       'DE': '21_germany', 
-      'FR': '33_france',
+      'FR': '19_france',
       'CZ': '42_czech_republic',
       'AT': '43_austria',
       'SK': '421_slovakia',
@@ -1101,43 +1101,43 @@
     });
     
     // Start polling for filter changes every 2 seconds
-    startFilterPolling();
+    // startFilterPolling();
   }
 
   // Polling mechanism: scan page for filter changes every 2 seconds
   let lastFiltersHash = '';
   let pollingInterval = null;
   
-  function startFilterPolling() {
-    if (pollingInterval) return; // Already polling
+  // function startFilterPolling() {
+  //   if (pollingInterval) return; // Already polling
     
-    pollingInterval = setInterval(async () => {
-      if (!isOpen || !panel) return; // Only poll when panel is visible
+  //   pollingInterval = setInterval(async () => {
+  //     if (!isOpen || !panel) return; // Only poll when panel is visible
       
-      try {
-        const filters = await parseFiltersFromPage();
-        const currentHash = JSON.stringify(filters);
+  //     try {
+  //       const filters = await parseFiltersFromPage();
+  //       const currentHash = JSON.stringify(filters);
         
-        // Only send update if filters actually changed
-        if (currentHash !== lastFiltersHash) {
-          console.log('Larry Extension: Filters changed on page, updating app...');
-          lastFiltersHash = currentHash;
+  //       // Only send update if filters actually changed
+  //       if (currentHash !== lastFiltersHash) {
+  //         console.log('Larry Extension: Filters changed on page, updating app...');
+  //         lastFiltersHash = currentHash;
           
-          const iframe = panel.querySelector('.larry-panel-iframe');
-          if (iframe && iframe.contentWindow) {
-            iframe.contentWindow.postMessage({
-              type: 'FILTERS_RESPONSE',
-              filters: filters
-            }, APP_URL);
-          }
-        }
-      } catch (error) {
-        console.warn('Larry Extension: Polling error:', error);
-      }
-    }, 2000); // Every 2 seconds
+  //         const iframe = panel.querySelector('.larry-panel-iframe');
+  //         if (iframe && iframe.contentWindow) {
+  //           iframe.contentWindow.postMessage({
+  //             type: 'FILTERS_RESPONSE',
+  //             filters: filters
+  //           }, APP_URL);
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.warn('Larry Extension: Polling error:', error);
+  //     }
+  //   }, 2000); // Every 2 seconds
     
-    console.log('Larry Extension: Filter polling started (every 2s)');
-  }
+  //   console.log('Larry Extension: Filter polling started (every 2s)');
+  // }
   
   function stopFilterPolling() {
     if (pollingInterval) {

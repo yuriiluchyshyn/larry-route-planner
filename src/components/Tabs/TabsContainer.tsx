@@ -4,20 +4,17 @@
  */
 
 import React from 'react';
-export type TabType = 'offers' | 'return' | 'routes';
+export type TabType = 'offers' | 'routes';
 
 interface TabsContainerProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
-  mainOffersCount: number;
-  returnOffersCount: number;
+  allOffersCount: number;
   routesCount: number;
   loading: boolean;
   optimizing: boolean;
-  includeReturnRoute: boolean;
   hasOffers: boolean;
   onExportOffers: () => void;
-  onExportReturnOffers: () => void;
   onExportRoutes: () => void;
   onReoptimize: () => void;
 }
@@ -25,15 +22,12 @@ interface TabsContainerProps {
 export const TabsContainer: React.FC<TabsContainerProps> = ({
   activeTab,
   onTabChange,
-  mainOffersCount,
-  returnOffersCount,
+  allOffersCount,
   routesCount,
   loading,
   optimizing,
-  includeReturnRoute,
   hasOffers,
   onExportOffers,
-  onExportReturnOffers,
   onExportRoutes,
   onReoptimize
 }) => {
@@ -43,41 +37,20 @@ export const TabsContainer: React.FC<TabsContainerProps> = ({
         className={`tab ${activeTab === 'offers' ? 'active' : ''}`}
         onClick={() => onTabChange('offers')}
       >
-        📦 Прямі маршрути ({loading ? '⏳' : mainOffersCount})
-        {activeTab === 'offers' && mainOffersCount > 0 && (
+        📦 Прямі маршрути ({loading ? '⏳' : allOffersCount})
+        {activeTab === 'offers' && allOffersCount > 0 && (
           <span
             className="tab-export-inline"
             onClick={(e) => {
               e.stopPropagation();
               onExportOffers();
             }}
-            title="Завантажити основні пропозиції у форматі CSV"
+            title="Завантажити всі пропозиції у форматі CSV"
           >
             📊
           </span>
         )}
       </button>
-      
-      {includeReturnRoute && (
-        <button
-          className={`tab ${activeTab === 'return' ? 'active' : ''}`}
-          onClick={() => onTabChange('return')}
-        >
-          🔄 Зворотні маршрути ({loading ? '⏳' : returnOffersCount})
-          {activeTab === 'return' && returnOffersCount > 0 && (
-            <span
-              className="tab-export-inline"
-              onClick={(e) => {
-                e.stopPropagation();
-                onExportReturnOffers();
-              }}
-              title="Завантажити зворотні пропозиції у форматі CSV"
-            >
-              📊
-            </span>
-          )}
-        </button>
-      )}
       
       <button
         className={`tab ${activeTab === 'routes' ? 'active' : ''}`}
