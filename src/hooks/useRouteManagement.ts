@@ -11,8 +11,7 @@ import { getOffers } from '../utils/services/ApiTransService.compatibility';
 import type { OffersRequestParams } from '../utils/services/ApiTransService.compatibility';
 // import { reverseGeocode } from '../utils/geocode';
 import { getApiTransService } from '../utils/services/ApiTransService';
-import { createOptimizedRoutes } from '../utils/strategies/new_strategy';
-// import { fetchFreightOffers } from '../utils/services/ApiTransService.compatibility';
+import { createOptimizedRoutes } from '../utils/strategies/new_strategy/route/roadOptimizer';
 
 interface UseRouteManagementProps {
   config: RouteConfig | null;
@@ -203,9 +202,6 @@ async function generateFilterFromConfig(config: RouteConfig): Promise<OffersRequ
     allLoadingCandidates.map(async (point) => {
       const converted = await convertRoutePointToApiFormat(point);
 
-      console.log("convertedconverted")
-      console.log(converted)
-
       // Якщо точка має координати (не 0), включаємо повну інформацію
       if (converted.coordinates.latitude !== 0 && converted.coordinates.longitude !== 0) {
         return {
@@ -275,130 +271,29 @@ async function generateFilterFromConfig(config: RouteConfig): Promise<OffersRequ
     })
   );
 
+  // Використовуємо типи вантажівок з конфігурації або дефолтні
+  const vehicleTypes = config.vehicleTypes && config.vehicleTypes.length > 0
+    ? config.vehicleTypes
+    : ["2_double_trailer", "3_lorry", "5_solo"];
+
   // Генеруємо фільтр
   const filter: OffersRequestParams['filter'] = {
     loading_place: loadingPlaces,
     unloading_place: unloadingPlaces,
     places_matching_type: config.placesMatchingType || 'cross',
-    size: config.vehicleTypes && config.vehicleTypes.length > 0
-      ? config.vehicleTypes
-      : ["2_double_trailer", "3_lorry", "5_solo"],
-    required_vehicle_size: config.vehicleTypes && config.vehicleTypes.length > 0
-      ? config.vehicleTypes
-      : ["2_double_trailer", "3_lorry", "5_solo"],
+    size: vehicleTypes,
+    required_vehicle_size: vehicleTypes,
     exclude_suspended: true
   };
 
   console.log('🔧 Згенерований фільтр:', filter);
   console.log(`📍 Loading places: ${filter.loading_place.length}`);
   console.log(`📍 Unloading places: ${filter.unloading_place.length}`);
+  console.log(`🚛 Vehicle types: ${vehicleTypes.join(', ')}`);
+  console.log(`🔄 Places matching type: ${filter.places_matching_type}`);
 
   return filter;
 }
-
-/**
- * Створити всі можливі комбінації RoutePoint з baseConfig
- * Повертає список маршрутів, де перший елемент завжди LOADING_POINT, другий - UNLOADING_POINT
- * HOME_POINT може бути як LOADING_POINT так і UNLOADING_POINT
- */
-// function createAllRouteConfigs(baseConfig: RouteConfig): RoutePoint[][] {
-//   const allRoutes: RoutePoint[][] = [];
-//   const allPoints = baseConfig.routes;
-
-//   // Розділяємо точки за типами
-//   const homePoints = allPoints.filter(point => point.type === RoutePointType.HOME_POINT);
-//   const loadingPoints = allPoints.filter(point => point.type === RoutePointType.LOADING_POINT);
-//   const unloadingPoints = allPoints.filter(point => point.type === RoutePointType.UNLOADING_POINT);
-
-//   console.log(`🔧 Знайдено точок: ${homePoints.length} домашніх, ${loadingPoints.length} завантаження, ${unloadingPoints.length} розвантаження`);
-
-//   // Створюємо пули точок для завантаження та розвантаження
-//   // HOME_POINT може бути як місцем завантаження, так і розвантаження
-//   const allLoadingCandidates = [...loadingPoints, ...homePoints];
-//   const allUnloadingCandidates = [...unloadingPoints, ...homePoints];
-
-//   // Генеруємо всі комбінації: LOADING_CANDIDATE → UNLOADING_CANDIDATE
-//   for (const loadingCandidate of allLoadingCandidates) {
-//     for (const unloadingCandidate of allUnloadingCandidates) {
-//       // Уникаємо маршрутів з однією і тією ж точкою (якщо це HOME_POINT)
-//       if (loadingCandidate.id === unloadingCandidate.id) {
-//         continue;
-//       }
-
-//       const route: RoutePoint[] = [loadingCandidate, unloadingCandidate];
-//       allRoutes.push(route);
-//     }
-//   }
-
-//   console.log(`🔧 Створено ${allRoutes.length} маршрутів (включаючи домашню базу як можливе місце завантаження/розвантаження)`);
-
-//   return allRoutes;
-// }
-
-/**
- * Завантажити пропозиції з відстеженням прогресу
- * Кожен маршрут: Домашня база → Точка завантаження → Точка розвантаження → Домашня база (якщо база задана)
- * Або: Точка завантаження → Точка розвантаження (якщо база не задана)
- */
-// async function fetchOffersWithProgress(
-//   routes: RoutePoint[][], 
-//   baseConfig: RouteConfig,
-//   setProgress: (progress: { current: number; total: number; currentRoute: string; phase: 'searching' | 'optimizing' | 'completed' }) => void
-// ): Promise<{ offers: FreightOffer[] }> {
-//   const allOffers: FreightOffer[] = [];
-
-//   console.log("🔧 fetchOffersWithProgress - обробка маршрутів:");
-//   console.log(`📊 Всього маршрутів для обробки: ${routes.length}`);
-//   routes.forEach((route, index) => {
-//     console.log(`  Маршрут ${index + 1}: ${route[0].locality || route[0].country} → ${route[1].locality || route[1].country}`);
-//   });
-
-//   for (let i = 0; i < routes.length; i++) {
-//     const route = routes[i];
-
-//     console.log("🔧 Обробляємо маршрут:");
-//     console.log(route);
-
-//     // Кожен маршрут має 2 точки: [0] - завантаження, [1] - розвантаження
-//     const loadingPoint = route[0];
-//     const unloadingPoint = route[1];
-
-//     // Формуємо назву маршруту
-//     const routeName = `📦 ${loadingPoint.locality || loadingPoint.country} → 🚚 ${unloadingPoint.locality || unloadingPoint.country}`;
-
-//     // Оновлюємо прогрес
-//     setProgress({
-//       current: i,
-//       total: routes.length,
-//       currentRoute: `Пошук: ${routeName} (${i + 1}/${routes.length})`,
-//       phase: 'searching'
-//     });
-
-//     try {
-//       // Створюємо тимчасовий конфіг у старому форматі для сумісності з API
-//       // const compatConfig = {
-//       //   ...baseConfig,
-//       //   loadingPoints: [loadingPoint],
-//       //   unloadingPoints: [unloadingPoint],
-//       // };
-
-//       // Використовуємо існуючу функцію fetchFreightOffers для одного конфігу
-//       // const offers = await fetchFreightOffers(compatConfig);
-//       const offers = await executeHardcodedRequest();
-
-//       allOffers.push(...offers);
-//       console.log(`✅ ${routeName}: ${offers.length} пропозицій (загалом зібрано: ${allOffers.length})`);
-
-//     } catch (error) {
-//       console.error(`❌ Помилка для маршруту ${routeName}:`, error);
-//       // Продовжуємо обробку інших маршрутів навіть якщо один з них не вдався
-//     }
-//   }
-
-//   console.log(`🎉 Завершено обробку всіх маршрутів! Загалом зібрано: ${allOffers.length} пропозицій`);
-
-//   return { offers: allOffers };
-// }
 
 /**
  * Завантажити всі сторінки пропозицій

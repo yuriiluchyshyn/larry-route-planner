@@ -53,6 +53,7 @@
       <div class="larry-panel-header">
         <span class="larry-panel-title">🚛 Larry Route Planner</span>
         <div class="larry-panel-controls">
+          <button class="larry-panel-refresh" title="Refresh filters from page">🔄</button>
           <button class="larry-panel-resize" title="Toggle size">⤢</button>
           <button class="larry-panel-close" title="Close">✕</button>
         </div>
@@ -62,6 +63,15 @@
 
     panel.querySelector('.larry-panel-close').addEventListener('click', hide);
     panel.querySelector('.larry-panel-resize').addEventListener('click', toggleSize);
+    
+    // Додаємо обробник для кнопки рефрешу з перевіркою
+    const refreshBtn = panel.querySelector('.larry-panel-refresh');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', refreshFilters);
+      console.log('Larry Extension: ✅ Refresh button event listener added');
+    } else {
+      console.error('Larry Extension: ❌ Refresh button not found!');
+    }
 
     // Make panel draggable by header
     makeDraggable(panel, panel.querySelector('.larry-panel-header'));
@@ -1179,6 +1189,66 @@
   }
 
   let isFullSize = false;
+
+  async function refreshFilters() {
+    console.log('Larry Extension: 🔄 Refreshing filters from page...');
+    
+    // Перевіряємо чи панель існує
+    if (!panel) {
+      console.error('Larry Extension: ❌ Panel not found');
+      return;
+    }
+    
+    try {
+      // Парсимо фільтри з поточної сторінки
+      console.log('Larry Extension: 📖 Parsing filters from page...');
+      const filters = await parseFiltersFromPage();
+      console.log('Larry Extension: 📥 Parsed filters:', filters);
+      
+      // Відправляємо оновлені фільтри в iframe
+      const iframe = panel.querySelector('.larry-panel-iframe');
+      if (iframe && iframe.contentWindow) {
+        console.log('Larry Extension: 📤 Sending filters to iframe...');
+        iframe.contentWindow.postMessage({
+          type: 'FILTERS_RESPONSE',
+          filters: filters
+        }, APP_URL);
+        
+        console.log('Larry Extension: ✅ Filters refreshed and sent to app');
+        
+        // Показуємо візуальний фідбек
+        const refreshBtn = panel.querySelector('.larry-panel-refresh');
+        if (refreshBtn) {
+          const originalText = refreshBtn.innerHTML;
+          refreshBtn.innerHTML = '✅';
+          refreshBtn.style.color = '#4CAF50';
+          
+          setTimeout(() => {
+            refreshBtn.innerHTML = originalText;
+            refreshBtn.style.color = '';
+          }, 1500);
+        }
+      } else {
+        console.warn('Larry Extension: ⚠️ Could not find iframe to send filters');
+        throw new Error('Iframe not found');
+      }
+    } catch (error) {
+      console.error('Larry Extension: ❌ Error refreshing filters:', error);
+      
+      // Показуємо помилку
+      const refreshBtn = panel.querySelector('.larry-panel-refresh');
+      if (refreshBtn) {
+        const originalText = refreshBtn.innerHTML;
+        refreshBtn.innerHTML = '❌';
+        refreshBtn.style.color = '#f44336';
+        
+        setTimeout(() => {
+          refreshBtn.innerHTML = originalText;
+          refreshBtn.style.color = '';
+        }, 2000);
+      }
+    }
+  }
 
   function toggleSize() {
     if (!panel) return;

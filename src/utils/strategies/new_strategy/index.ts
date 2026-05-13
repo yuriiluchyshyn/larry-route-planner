@@ -18,7 +18,6 @@ export * from './redis/config/redisConfig';
 
 // Експортуємо сервіси
 export * from './redis/redisRouteService';
-export * from './route/roadOptimizer';
 
 // Імпортуємо типи з моделей
 import type { 

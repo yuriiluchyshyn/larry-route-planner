@@ -5,6 +5,65 @@
 
 import { getApiTransService } from './ApiTransService';
 
+// ============================================================
+// LOCATION SEARCH INTERFACES
+// ============================================================
+
+export interface LocationSearchFilter {
+  type?: string[];
+}
+
+export interface LocationSearchParams {
+  search: string;
+  lang?: string;
+  filter?: LocationSearchFilter;
+  offset?: number;
+  limit?: number;
+}
+
+export interface LocationOriginalNames {
+  countryName?: string | null;
+  admin1?: string | null;
+  locality?: string | null;
+  district?: string | null;
+}
+
+export interface LocationItem {
+  geocoderId: string;
+  geocoderDetailedId?: string | null;
+  country: string;
+  type: string;
+  countryName?: string | null;
+  admin1?: string | null;
+  locality?: string | null;
+  district?: string | null;
+  postalCode?: string | null;
+  street?: string | null;
+  number?: string | null;
+  originalNames?: LocationOriginalNames;
+  latitude: number;
+  longitude: number;
+  bbox?: number[][];
+  radius?: number;
+  locationId: number;
+  detailedLocationId?: number | null;
+  timezone?: string;
+}
+
+export interface LocationSearchResponse {
+  page_count: number;
+  total_items: number;
+  page: number;
+  page_size: number;
+  _embedded: {
+    locations: LocationItem[];
+  };
+}
+
+// ============================================================
+// FREIGHT OFFERS INTERFACES
+// ============================================================
+
 // TypeScript interfaces for the freight offers response
 export interface FreightOfferSpot {
   place: {
@@ -277,345 +336,86 @@ export async function getOffers(
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /**
- * Метод для виконання хардкодованого запиту з конкретними параметрами (backward compatibility)
- * Приймає хардкодовані параметри і виконує запит через проксі
+ * Метод для пошуку локацій через Trans.eu API
+ * Приймає параметри пошуку як інтерфейс і виконує запит через проксі з токеном
  */
-export async function executeHardcodedRequest(hardcodedParams?: OffersRequestParams): Promise<FreightOffersResponse> {
-  const params = hardcodedParams || createDefaultHardcodedParams();
-  
-  return getOffers(
-    params.filter,
-    params.pagination,
-    params.sort,
-    params.counters
-  );
+export async function searchTranseuLocation(
+  params: LocationSearchParams
+): Promise<LocationSearchResponse> {
+  try {
+    console.log('🔍 Виконання пошуку локацій з параметрами...');
+    console.log('🔧 Параметри пошуку:', params);
+    
+    const apiService = getApiTransService();
+    
+    // Перевіряємо підключення до проксі
+    const isConnected = await apiService.checkHealth();
+    if (!isConnected) {
+      throw new Error('Проксі-сервер недоступний. Запустіть його спочатку.');
+    }
+
+    // Формуємо параметри запиту з інтерфейсу
+    const requestParams: Record<string, string> = {
+      search: params.search,
+      lang: params.lang || 'en',
+      offset: (params.offset || 0).toString(),
+      limit: (params.limit || 10).toString()
+    };
+
+    // Додаємо фільтр якщо є
+    if (params.filter) {
+      requestParams.filter = JSON.stringify(params.filter);
+    } else {
+      // Використовуємо дефолтний фільтр для всіх типів локацій
+      requestParams.filter = JSON.stringify({
+        type: [
+          'locality_postal_area',
+          'locality',
+          'postal_area',
+          'admin_area_level_1',
+          'admin_area_level_2',
+          'country'
+        ]
+      });
+    }
+
+    console.log('🔧 Сформовані параметри запиту:', requestParams);
+
+    // Виконуємо запит через проксі до ендпоінту геокодера
+    // Використовуємо правильний ендпоінт та базовий URL для геокодера
+    const response = await apiService.makeRequest(
+      "/app/geocoder-api/api/v2/locations",
+      {
+        method: 'GET',
+        params: requestParams,
+        targetBaseUrl: 'https://api-platform.trans.eu' // Використовуємо правильний базовий URL для геокодера
+      }
+    );
+
+    if (!response.success) {
+      throw new Error(response.error || 'Помилка виконання запиту пошуку локацій');
+    }
+
+    console.log(`✅ Пошук локацій виконано успішно!`);
+    console.log('📊 Знайдено локацій:', response.data?._embedded?.locations?.length || 0);
+    console.log('📊 Загальна кількість:', response.data?.total_items || 0);
+    
+    // Повертаємо точну структуру як в оригінальному API
+    const result: LocationSearchResponse = {
+      page_count: response.data?.page_count || 1,
+      total_items: response.data?.total_items || 0,
+      page: response.data?.page || 1,
+      page_size: response.data?.page_size || 0,
+      _embedded: {
+        locations: response.data?._embedded?.locations || []
+      }
+    };
+
+    return result;
+
+  } catch (error) {
+    console.error('❌ Помилка виконання пошуку локацій:', error);
+    throw error;
+  }
 }
-
-
-
-
-
-
-
-/**
- * Створює дефолтні хардкодовані параметри для тестування
- */
-export function createDefaultHardcodedParams(): OffersRequestParams {
-  return {
-      filter: {
-        loading_place: [
-          {
-            address: {
-              country: ["47_poland"],
-              locality: "Kraków",
-              postal_code: "30-001"
-            },
-            coordinates: {
-              latitude: 50.077850516,
-              longitude: 19.94171128,
-              range: 50
-            }
-          }
-        ],
-        unloading_place: [
-          {
-            address: {
-              country: ["19_france"]
-            },
-            isCountry: true
-          },
-          {
-            address: {
-              country: ["21_germany"]
-            },
-            isCountry: true
-          }
-        ],
-        places_matching_type: "cross",
-        size: ["2_double_trailer", "3_lorry", "5_solo"],
-        required_vehicle_size: ["2_double_trailer", "3_lorry", "5_solo"],
-        exclude_suspended: true
-      },
-      pagination: {
-        search_after: {
-          id: "01KRE6JA7V73SGB3R8187SHZZD"
-        }
-      },
-      sort: {
-        field: "index",
-        order: "desc"
-      },
-      counters: ["all"]
-  };
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-// /**
-//  * Функції сумісності для ApiTransService
-//  * Забезпечують сумісність з існуючим кодом routeApiService.ts та geocoderService.ts
-//  */
-
-// import { getApiTransService, type GeocodeRequest, type GeocodeResponse } from './ApiTransService';
-// import type { FreightOffersResponse, RouteData } from '../strategies/new_strategy/models/routeModels';
-// import type { ApiStats } from '../strategies/new_strategy/models/apiModels';
-
-// /**
-//  * Функція для пошуку вантажних пропозицій по одному конфігу
-//  */
-// export async function fetchFreightOffer(config: any): Promise<any[]> {
-//   try {
-//     console.log("🔧 fetchFreightOffer (compatibility) - конфігурація для одного пошуку:");
-//     console.log(`  Loading: ${config.loadingPoints?.[0]?.locality} (${config.loadingPoints?.[0]?.country})`);
-//     console.log(`  Unloading: ${config.unloadingPoints?.[0]?.locality} (${config.unloadingPoints?.[0]?.country})`);
-//     console.log('🔍 DEBUG: Повний конфіг:', config);
-//     console.log('🔍 DEBUG: Loading point повністю:', config.loadingPoints?.[0]);
-//     console.log('🔍 DEBUG: Unloading point повністю:', config.unloadingPoints?.[0]);
-    
-//     const apiService = getApiTransService();
-    
-//     // Встановлюємо токен якщо є
-//     if (config.bearerToken) {
-//       apiService.setAuthToken(config.bearerToken);
-//       console.log('🔑 Токен встановлено');
-//     } else {
-//       console.warn('⚠️ Токен відсутній!');
-//     }
-    
-//     console.log('🚀 Використовуємо ApiTransService для завантаження маршрутів...');
-    
-//     const loadingPlaceConfig = createPlaceConfigCompat(config.loadingPoints?.[0]);
-//     const unloadingPlaceConfig = createPlaceConfigCompat(config.unloadingPoints?.[0]);
-    
-//     console.log('🔍 DEBUG: loadingPlaceConfig після обробки:', loadingPlaceConfig);
-//     console.log('🔍 DEBUG: unloadingPlaceConfig після обробки:', unloadingPlaceConfig);
-    
-//     // Робимо один запит для отримання всіх пропозицій для цієї пари точок
-//     const response = await apiService.getAllRoutes({
-//       filters: {
-//         loadingPlace: loadingPlaceConfig,
-//         unloadingPlace: unloadingPlaceConfig
-//       },
-//       vehicleTypes: config.vehicleTypes && config.vehicleTypes.length > 0 
-//         ? config.vehicleTypes 
-//         : ["2_double_trailer", "3_lorry", "5_solo"], // Дефолтні типи транспорту
-//       placesMatchingType: config.placesMatchingType || 'cross'
-//     });
-
-//     const offers = response._embedded?.['freight-offers'] || [];
-//     console.log(`✅ Отримано ${offers.length} пропозицій для ${config.loadingPoints?.[0]?.locality} → ${config.unloadingPoints?.[0]?.locality}`);
-
-//     return offers;
-//   } catch (error) {
-//     console.error('Error fetching freight offer via ApiTransService:', error);
-//     throw error;
-//   }
-// }
-
-// /**
-//  * Функція для сумісності з fetchFreightOffers з routeApiService.ts
-//  * Приймає один конфіг і повертає пропозиції
-//  */
-// export async function fetchFreightOffers(config: any): Promise<any[]> {
-//   try {
-//     console.log(`🔧 fetchFreightOffers (compatibility) - обробка конфігурації:`);
-//     console.log(config);
-    
-//     // Викликаємо fetchFreightOffer для конфігу
-//     const offers = await fetchFreightOffer(config);
-    
-//     console.log(`🎉 Конфіг оброблено! Отримано: ${offers.length} пропозицій`);
-
-//     return offers;
-//   } catch (error) {
-//     console.error('Error fetching freight offers:', error);
-//     throw error;
-//   }
-// }
-
-// /**
-//  * Створити конфігурацію місця для API запиту (compatibility)
-//  */
-// function createPlaceConfigCompat(point: any): any {
-//   if (!point) {
-//     console.warn('⚠️ createPlaceConfigCompat: point is undefined');
-//     return undefined;
-//   }
-  
-//   console.log('🔧 createPlaceConfigCompat - вхідна точка:', point);
-  
-//   // Повертаємо структуру, яку очікує createApiFilter
-//   const result: any = {
-//     country: point.country,
-//     range: point.range || 50
-//   };
-
-//   // Додаємо locality тільки якщо воно не порожнє
-//   if (point.locality && point.locality.trim() !== '') {
-//     result.locality = point.locality;
-//   }
-
-//   // Додаємо postalCode тільки якщо воно не порожнє
-//   if (point.postalCode && point.postalCode.trim() !== '') {
-//     result.postalCode = point.postalCode;
-//   }
-
-//   // Додаємо координати якщо є
-//   if (point.latitude && point.longitude) {
-//     result.latitude = point.latitude;
-//     result.longitude = point.longitude;
-//   }
-  
-//   console.log('🔧 createPlaceConfigCompat - результат:', result);
-  
-//   return result;
-// }
-
-// /**
-//  * Функція для сумісності з geocodeAddress з geocoderService.ts
-//  */
-// export async function geocodeAddress(
-//   address: { country?: string; postalCode?: string; locality?: string }
-// ): Promise<{ latitude: number; longitude: number } | null> {
-//   const apiService = getApiTransService();
-  
-//   const result = await apiService.geocodeAddress({
-//     country: address.country,
-//     postalCode: address.postalCode,
-//     locality: address.locality
-//   });
-  
-//   if (result) {
-//     return {
-//       latitude: result.latitude,
-//       longitude: result.longitude
-//     };
-//   }
-  
-//   return null;
-// }
-
-// /**
-//  * Клас для сумісності з RouteApiService
-//  */
-// export class RouteApiServiceCompat {
-//   private apiService: any;
-
-//   constructor(apiKey?: string) {
-//     this.apiService = getApiTransService();
-    
-//     if (apiKey) {
-//       this.apiService.setAuthToken(apiKey);
-//     }
-    
-//     console.log(`🔧 RouteApiServiceCompat initialized (delegating to ApiTransService)`);
-//   }
-
-//   /**
-//    * Оновити токен автентифікації
-//    */
-//   updateAuthToken(token: string): void {
-//     this.apiService.setAuthToken(token);
-//   }
-
-//   /**
-//    * Перевірити доступність API через проксі
-//    */
-//   async checkConnection(): Promise<boolean> {
-//     return this.apiService.checkHealth();
-//   }
-
-//   /**
-//    * Отримати всі доступні маршрути
-//    */
-//   async getAllRoutes(params?: any): Promise<FreightOffersResponse> {
-//     return this.apiService.getAllRoutes(params);
-//   }
-
-//   /**
-//    * Отримати маршрут за ID
-//    */
-//   async getRouteById(routeId: string): Promise<RouteData> {
-//     const response = await this.apiService.getFreightOfferById(routeId);
-//     if (response.success) {
-//       return response.data;
-//     }
-//     throw new Error(response.error || `Failed to fetch route ${routeId}`);
-//   }
-
-//   /**
-//    * Пошук маршрутів за критеріями
-//    */
-//   async searchRoutes(searchParams: any): Promise<FreightOffersResponse> {
-//     return this.apiService.searchRoutes(searchParams);
-//   }
-
-//   /**
-//    * Отримати статистику маршрутів
-//    */
-//   async getRoutesStats(): Promise<ApiStats> {
-//     return this.apiService.getRoutesStats();
-//   }
-
-//   /**
-//    * Отримати статистику проксі
-//    */
-//   getProxyStats() {
-//     return {
-//       message: 'Using ApiTransService - proxy client is simplified',
-//       config: this.apiService.getConfig()
-//     };
-//   }
-
-//   /**
-//    * Отримати поточну конфігурацію
-//    */
-//   getConfig() {
-//     return this.apiService.getConfig();
-//   }
-// }
-
-// /**
-//  * Клас для сумісності з GeocoderService
-//  */
-// export class GeocoderServiceCompat {
-//   private apiService: any;
-
-//   constructor() {
-//     this.apiService = getApiTransService();
-//     console.log(`🔧 GeocoderServiceCompat initialized (delegating to ApiTransService)`);
-//   }
-
-//   /**
-//    * Геокодування адреси
-//    */
-//   async geocodeAddress(request: GeocodeRequest): Promise<GeocodeResponse | null> {
-//     return this.apiService.geocodeAddress(request);
-//   }
-
-// }

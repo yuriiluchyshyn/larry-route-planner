@@ -161,8 +161,6 @@ export interface RouteConfig {
   bearerToken: string;
   // Route object with structured route points
   routes: RoutePoint[];
-  // Home base (derived from routes with HOME_POINT type)
-  homeBase?: RoutePoint;
   // Filter params
   minWeight: number;
   maxWeight?: number;

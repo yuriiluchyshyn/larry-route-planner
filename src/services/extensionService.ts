@@ -30,6 +30,17 @@ export interface OfferSearchData {
  * Перевірити чи додаток працює в контексті extension
  */
 export function isInExtensionContext(): boolean {
+  // Дозволяємо перевизначити режим через window.__forceStandaloneMode
+  if ((window as any).__forceStandaloneMode) {
+    return false;
+  }
+  
+  // Перевіряємо чи є параметр в URL для standalone режиму
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('standalone') === 'true') {
+    return false;
+  }
+  
   return window.parent !== window;
 }
 

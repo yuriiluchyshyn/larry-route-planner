@@ -1551,3 +1551,90 @@ input[type="text"]:placeholder-shown {
     align-self: flex-end;
   }
 }
+
+/* Vehicle Types Styles */
+.vehicle-types-section {
+  margin-top: 8px;
+}
+
+.selected-types {
+  margin-bottom: 12px;
+}
+
+.types-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.types-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.type-badge.active {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.type-badge.default {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.no-types {
+  padding: 12px;
+  background: rgba(255, 193, 7, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.default-types {
+  margin-top: 8px;
+}
+
+.status-warning {
+  color: #856404;
+  font-weight: 500;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #4a9eff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.btn-link:hover {
+  color: #3580d4;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-secondary:hover {
+  background: #5a6268;
+}

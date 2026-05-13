@@ -18,13 +18,15 @@ interface UseExtensionMessagingProps {
   onConfigChange: (config: RouteConfig) => void;
   onTokenReceived: (token: string) => void;
   onSearchStatusChange: (status: string | null) => void;
+  onExtensionVehicleTypesReceived?: (types: string[]) => void;
 }
 
 export function useExtensionMessaging({
   config,
   onConfigChange,
   onTokenReceived,
-  onSearchStatusChange
+  onSearchStatusChange,
+  onExtensionVehicleTypesReceived
 }: UseExtensionMessagingProps) {
   
   // Initialize extension messaging
@@ -67,6 +69,12 @@ export function useExtensionMessaging({
     
     if (event.data.type === 'FILTERS_RESPONSE' && event.data.filters) {
       console.log('Larry: Received filters from extension:', event.data.filters);
+      
+      // Зберігаємо оригінальні типи вантажівок з extension
+      if (event.data.filters.vehicleTypes && Array.isArray(event.data.filters.vehicleTypes)) {
+        onExtensionVehicleTypesReceived?.(event.data.filters.vehicleTypes);
+      }
+      
       const newConfig = processFiltersFromExtension(event.data.filters, config);
       onConfigChange(newConfig);
     }
@@ -90,7 +98,7 @@ export function useExtensionMessaging({
       // Clear status after 5 seconds
       setTimeout(() => onSearchStatusChange(null), 5000);
     }
-  }, [config, onConfigChange, onTokenReceived, onSearchStatusChange]);
+  }, [config, onConfigChange, onTokenReceived, onSearchStatusChange, onExtensionVehicleTypesReceived]);
 
   // Listen for messages from extension
   useEffect(() => {

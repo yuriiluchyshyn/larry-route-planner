@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
 import { MapModal } from './MapModal';
+import { VehicleTypesModal } from './VehicleTypesModal';
 // import { reverseGeocode } from '../utils/geocode';
-import { legacyToStrategy, RouteStrategy } from '../utils/routeStrategy';
+import { legacyToStrategy } from '../utils/routeStrategy';
 import { isInExtensionContext, requestTokenFromExtension, requestFiltersFromExtension } from '../services/extensionService';
 import type { RouteConfig, WayPoint } from '../types';
 import { reverseGeocode } from '../utils/geocode';
+import { convertApiCodesToVehicleTypes } from '../utils/vehicleTypeMapper';
+import { getCurrentLocation, isGeolocationAvailable } from '../utils/geolocation';
 
 interface ConfigPanelProps {
   config: RouteConfig | null;
   onChange: (config: RouteConfig) => void;
   onFetch: () => void;
   loading: boolean;
+  extensionVehicleTypes?: string[];
 }
 
 // Local storage key
@@ -178,6 +182,7 @@ export function ConfigPanel({
   onChange,
   onFetch,
   loading,
+  extensionVehicleTypes = []
 }: ConfigPanelProps) {
   // Якщо конфігурації немає, показуємо повідомлення
   if (!config) {
@@ -213,6 +218,15 @@ export function ConfigPanel({
     initialLon?: number;
   } | null>(null);
 
+  const [vehicleTypesModal, setVehicleTypesModal] = useState(false);
+
+  // Оновлюємо extensionVehicleTypes коли отримуємо нові дані
+  useEffect(() => {
+    if (extensionVehicleTypes.length > 0) {
+      console.log('Larry: Updated extension vehicle types:', extensionVehicleTypes);
+    }
+  }, [extensionVehicleTypes]);
+
   // Collapsible sections state - всі розділи за замовчуванням закриті
   const [collapsed, setCollapsed] = useState({
     api: true,
@@ -235,6 +249,44 @@ export function ConfigPanel({
     }
   }, []);
 
+  // Auto-detect location if no home base is set
+  useEffect(() => {
+    const autoDetectLocation = async () => {
+      // Перевіряємо чи вже є домашня база
+      const hasHomeBase = config?.routes?.some(r => r.type === 'homePoint');
+      
+      if (!hasHomeBase && isGeolocationAvailable()) {
+        try {
+          console.log('🏠 No home base found, auto-detecting location...');
+          const location = await getCurrentLocation();
+          
+          const geo = await reverseGeocode(location.latitude, location.longitude);
+          
+          const newHomePoint = {
+            type: 'homePoint' as const,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            locality: geo.locality || 'Current Location',
+            postalCode: geo.postalCode || '',
+            country: geo.country || 'Unknown',
+          };
+          
+          const updatedRoutes = [...(config?.routes || []), newHomePoint];
+          onChange({ ...config, routes: updatedRoutes });
+          
+          console.log('✅ Auto-detected home base:', newHomePoint);
+        } catch (error) {
+          console.log('ℹ️ Could not auto-detect location:', error);
+          // Не показуємо помилку користувачу - це автоматична функція
+        }
+      }
+    };
+
+    // Запускаємо через невелику затримку щоб конфіг встиг завантажитись
+    const timer = setTimeout(autoDetectLocation, 1000);
+    return () => clearTimeout(timer);
+  }, [config?.routes]);
+
   // Save config whenever it changes
   useEffect(() => {
     saveConfig(config);
@@ -254,12 +306,19 @@ export function ConfigPanel({
 
   const handleMapSelect = async (lat: number, lon: number) => {
     if (!mapModal) return;
+    
+    console.log('🗺️ Map selected:', { lat, lon, modalType: mapModal.type });
+    
     const geo = await reverseGeocode(lat, lon);
+    console.log('🌍 Geocoded result:', geo);
 
     if (mapModal.type === 'home') {
-      // Update home base in routes array
+      // Update or create home base in routes array
       const homePoint = config.routes?.find(r => r.type === 'homePoint');
+      console.log('🏠 Current home point:', homePoint);
+      
       if (homePoint) {
+        // Update existing home point
         const updatedRoutes = config.routes.map(r => 
           r.type === 'homePoint' ? {
             ...r,
@@ -270,24 +329,49 @@ export function ConfigPanel({
             country: geo.country || r.country,
           } : r
         );
+        console.log('✏️ Updating existing home point:', updatedRoutes);
         onChange({ ...config, routes: updatedRoutes });
       } else {
-        // Створюємо нову домашню точку якщо її немає
-        const newHome = {
-          id: 'home-base',
+        // Create new home point if it doesn't exist
+        const newHomePoint = {
           type: 'homePoint' as const,
-          locality: geo.locality || '',
-          postalCode: geo.postalCode || '',
-          country: geo.country || '',
           latitude: lat,
           longitude: lon,
-          range: 50
+          locality: geo.locality || 'Unknown',
+          postalCode: geo.postalCode || '',
+          country: geo.country || 'Unknown',
         };
-        onChange({ ...config, routes: [...(config.routes || []), newHome] });
+        
+        const updatedRoutes = [...(config.routes || []), newHomePoint];
+        console.log('➕ Creating new home point:', updatedRoutes);
+        onChange({ ...config, routes: updatedRoutes });
       }
     }
 
     setMapModal(null);
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (!isGeolocationAvailable()) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+
+    try {
+      console.log('📍 Getting current location...');
+      const location = await getCurrentLocation();
+      console.log('📍 Current location:', location);
+      
+      // Використовуємо ту ж логіку що і в handleMapSelect
+      await handleMapSelect(location.latitude, location.longitude);
+      
+      // Показуємо повідомлення про успіх
+      alert(`✅ Home base set to your current location!\nAccuracy: ${location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown'}`);
+      
+    } catch (error) {
+      console.error('❌ Error getting location:', error);
+      alert(`❌ Could not get your location: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   return (
@@ -450,12 +534,18 @@ export function ConfigPanel({
                 </div>
               )}
               {config?.routes?.filter(p => p.type === 'homePoint').length > 0 && (
-                <div style={{ marginTop: '4px' }}>
-                  <strong>Home Base:</strong> {config.routes.filter(p => p.type === 'homePoint').map(p => {
+                <div style={{ marginTop: '4px', padding: '8px', background: '#e8f5e8', borderRadius: '4px', border: '1px solid #4caf50' }}>
+                  <strong>🏠 Home Base:</strong> {config.routes.filter(p => p.type === 'homePoint').map(p => {
                     const displayName = p.locality || (p.country ? getCountryDisplayName(p.country) : 'Unknown');
                     const postalInfo = p.postalCode || (p.locality ? 'No postal' : 'Country-wide');
-                    return `${displayName} (${postalInfo}) - ${p.range || 50}km`;
-                  }).join(', ')}
+                    const coords = `${p.latitude?.toFixed(4)}, ${p.longitude?.toFixed(4)}`;
+                    return (
+                      <div key={`${p.latitude}-${p.longitude}`}>
+                        📍 {displayName} ({postalInfo})<br/>
+                        <small style={{ color: '#666' }}>Coordinates: {coords}</small>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {(!config?.routes?.length) && (
@@ -463,14 +553,53 @@ export function ConfigPanel({
                   ⚠️ No points detected. Make sure you have selected locations on the Trans.eu platform.
                 </div>
               )}
-              <div style={{ marginTop: '12px' }}>
-                <button 
-                  className="add-btn"
-                  onClick={() => window.location.reload()}
-                  title="Refresh data from Extension"
-                >
-                  🔄 Refresh from Extension
-                </button>
+              
+              {/* Vehicle Types Configuration */}
+              <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="field">
+                  <label>🚛 Типи вантажівок</label>
+                  <div className="vehicle-types-section">
+                    {extensionVehicleTypes.length > 0 ? (
+                      <div className="selected-types">
+                        <div className="types-header">
+                          <strong>✅ Вибрано на platform.trans.eu ({extensionVehicleTypes.length}):</strong>
+                          <button
+                            type="button"
+                            onClick={() => setVehicleTypesModal(true)}
+                            className="btn-link"
+                          >
+                            Переглянути деталі
+                          </button>
+                        </div>
+                        <div className="types-list">
+                          {extensionVehicleTypes.map((type, index) => (
+                            <span key={index} className="type-badge active">
+                              {type}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="no-types">
+                        <span className="status-warning">⚠️ Типи вантажівок не вибрано на сайті</span>
+                        <div className="default-types">
+                          <strong>Використовуються дефолтні:</strong>
+                          <div className="types-list">
+                            {convertApiCodesToVehicleTypes(["2_double_trailer", "3_lorry", "5_solo"]).map((type, index) => (
+                              <span key={index} className="type-badge default">
+                                {type}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="help-text">
+                    Типи вантажівок автоматично синхронізуються з вашими налаштуваннями на platform.trans.eu. 
+                    Щоб змінити типи, оновіть фільтри на основній сторінці сайту.
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -506,26 +635,16 @@ export function ConfigPanel({
             <input
               type="text"
               value={config.routes?.find(r => r.type === 'homePoint')?.locality || ''}
+              disabled={isInExtensionContext()}
               onChange={(e) => {
-                const homePoint = config.routes?.find(r => r.type === 'homePoint');
-                if (homePoint) {
-                  const updatedRoutes = config.routes.map(r => 
-                    r.type === 'homePoint' ? { ...r, locality: e.target.value } : r
-                  );
-                  onChange({ ...config, routes: updatedRoutes });
-                } else {
-                  // Створюємо нову домашню точку
-                  const newHome = {
-                    id: 'home-base',
-                    type: 'homePoint' as const,
-                    locality: e.target.value,
-                    postalCode: '',
-                    country: '',
-                    latitude: 0,
-                    longitude: 0,
-                    range: 50
-                  };
-                  onChange({ ...config, routes: [...(config.routes || []), newHome] });
+                if (!isInExtensionContext()) {
+                  const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                  if (homePoint) {
+                    const updatedRoutes = config.routes.map(r => 
+                      r.type === 'homePoint' ? { ...r, locality: e.target.value } : r
+                    );
+                    onChange({ ...config, routes: updatedRoutes });
+                  }
                 }
               }}
             />
@@ -536,13 +655,16 @@ export function ConfigPanel({
               type="number"
               step="0.000001"
               value={config.routes?.find(r => r.type === 'homePoint')?.latitude || 0}
+              disabled={isInExtensionContext()}
               onChange={(e) => {
-                const homePoint = config.routes?.find(r => r.type === 'homePoint');
-                if (homePoint) {
-                  const updatedRoutes = config.routes.map(r => 
-                    r.type === 'homePoint' ? { ...r, latitude: parseFloat(e.target.value) || 0 } : r
-                  );
-                  onChange({ ...config, routes: updatedRoutes });
+                if (!isInExtensionContext()) {
+                  const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                  if (homePoint) {
+                    const updatedRoutes = config.routes.map(r => 
+                      r.type === 'homePoint' ? { ...r, latitude: parseFloat(e.target.value) || 0 } : r
+                    );
+                    onChange({ ...config, routes: updatedRoutes });
+                  }
                 }
               }}
             />
@@ -553,13 +675,16 @@ export function ConfigPanel({
               type="number"
               step="0.000001"
               value={config.routes?.find(r => r.type === 'homePoint')?.longitude || 0}
+              disabled={isInExtensionContext()}
               onChange={(e) => {
-                const homePoint = config.routes?.find(r => r.type === 'homePoint');
-                if (homePoint) {
-                  const updatedRoutes = config.routes.map(r => 
-                    r.type === 'homePoint' ? { ...r, longitude: parseFloat(e.target.value) || 0 } : r
-                  );
-                  onChange({ ...config, routes: updatedRoutes });
+                if (!isInExtensionContext()) {
+                  const homePoint = config.routes?.find(r => r.type === 'homePoint');
+                  if (homePoint) {
+                    const updatedRoutes = config.routes.map(r => 
+                      r.type === 'homePoint' ? { ...r, longitude: parseFloat(e.target.value) || 0 } : r
+                    );
+                    onChange({ ...config, routes: updatedRoutes });
+                  }
                 }
               }}
             />
@@ -573,14 +698,23 @@ export function ConfigPanel({
               setMapModal({
                 type: 'home',
                 index: null,
-                initialLat: homePoint?.latitude || 50.06,
-                initialLon: homePoint?.longitude || 19.94,
+                initialLat: homePoint?.latitude || 0,
+                initialLon: homePoint?.longitude || 0,
               });
             }}
             title="Pick home base on map"
-            style={{ width: '100%', padding: '8px' }}
+            style={{ width: '100%', padding: '8px', marginBottom: '8px' }}
           >
             🗺️ Pick Home Base on Map
+          </button>
+          
+          <button
+            className="pick-map-btn"
+            onClick={handleUseCurrentLocation}
+            title="Use your current location as home base"
+            style={{ width: '100%', padding: '8px', background: '#2c5aa0' }}
+          >
+            📍 Use My Current Location
           </button>
         </div>
         </div>
@@ -751,7 +885,7 @@ export function ConfigPanel({
         </div>
         
         {/* AI Configuration Section */}
-        {(config.routeStrategy === RouteStrategy.NEW_STRATEGY || 
+        {/* {(config.routeStrategy === RouteStrategy.NEW_STRATEGY || 
           (!config.routeStrategy && config.useAIOptimization)) && (
           <div className="ai-config-section">
             <div className="ai-status">
@@ -780,7 +914,7 @@ export function ConfigPanel({
               <strong>🥈 Groq (безкоштовно):</strong> <a href="https://console.groq.com" target="_blank" rel="noopener">Отримати ключ</a>
             </div>
           </div>
-        )}
+        )} */}
         
         <div className="field checkbox-field">
           <label htmlFor="includeReturnRoute">
@@ -921,6 +1055,12 @@ export function ConfigPanel({
           initialLon={mapModal.initialLon}
         />
       )}
+
+      <VehicleTypesModal
+        isOpen={vehicleTypesModal}
+        onClose={() => setVehicleTypesModal(false)}
+        extensionTypes={extensionVehicleTypes}
+      />
     </div>
   );
 }

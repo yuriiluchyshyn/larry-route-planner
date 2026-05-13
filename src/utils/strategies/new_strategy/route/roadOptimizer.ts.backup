@@ -1,0 +1,1307 @@
+/**
+ * Road Optimizer - Оптимізація маршрутів на основі пропозицій
+ * Знаходить оптимальні маршрути з домашньої бази з мінімальним порожнім пробігом
+ */
+
+import type { FreightOffer, OptimizedRoute, RouteSegment, RoutePoint } from '../../../../types';
+import { searchTranseuLocation } from '../../../services/ApiTransService.compatibility';
+import type { LocationSearchParams } from '../../../services/ApiTransService.compatibility';
+
+interface OptimizationConfig {
+  homeBase: RoutePoint;
+  maxEmptyRunPercent: number; // максимальний відсоток порожнього пробігу (наприклад, 10%)
+  pricePerKm: number; // ціна за км для розрахунку прибутку
+  averageSpeedKmh: number; // середня швидкість вантажівки
+  maxResults?: number; // максимальна кількість результатів
+  maxRouteDepth?: number; // максимальна глибина маршруту (кількість оферів)
+  maxEmptyDistanceKm?: number; // максимальна відстань порожнього пробігу між оферами
+  maxSearchTimeMs?: number; // максимальний час пошуку в мілісекундах
+}
+
+interface RouteCandidate {
+  offers: FreightOffer[];
+  totalDistance: number;
+  loadedDistance: number;
+  totalEmptyDistance: number; // Весь порожній пробіг: дім→завантаження + переїзди + розвантаження→дім
+  emptyRunPercent: number; // Відсоток порожнього пробігу від загальної відстані
+  totalEarnings: number;
+  score: number;
+}
+
+/**
+ * Інтерфейс для геокодованого офера з координатами
+ */
+interface GeocodedOffer extends FreightOffer {
+  _geocoded: {
+    loading: { lat: number; lon: number; location: string };
+    unloading: { lat: number; lon: number; location: string };
+  };
+}
+
+/**
+ * Розрахунок відстані між двома точками (формула Haversine)
+ */
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // радіус Землі в км
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+/**
+ * Швидкий розрахунок відстані між геокодованими точками (без async)
+ */
+function calculateDistanceFast(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number }
+): number {
+  return calculateDistance(from.lat, from.lon, to.lat, to.lon);
+}
+
+
+
+/**
+ * Кеш для геокодованих локацій щоб уникнути повторних запитів
+ */
+const geocodeCache = new Map<string, { lat: number; lon: number }>();
+
+/**
+ * Геокодування локації через Trans.eu API з кешуванням
+ */
+async function geocodeLocation(locality: string, country: string, postalCode?: string): Promise<{ lat: number; lon: number } | null> {
+  // Створюємо ключ для кешу
+  const cacheKey = `${country}:${locality}:${postalCode || ''}`;
+  
+  // Перевіряємо кеш
+  if (geocodeCache.has(cacheKey)) {
+    console.log(`💾 Використовуємо закешовані координати для: ${cacheKey}`);
+    return geocodeCache.get(cacheKey)!;
+  }
+
+  // Формуємо пошуковий запит
+  let searchQuery = locality;
+  if (postalCode) {
+    searchQuery = `${postalCode}, ${locality}`;
+  }
+  if (country) {
+    searchQuery += `, ${country}`;
+  }
+
+  try {
+    console.log(`🌍 Геокодування локації: ${searchQuery}`);
+
+    const params: LocationSearchParams = {
+      search: searchQuery,
+      lang: 'en',
+      limit: 1
+    };
+
+    const response = await searchTranseuLocation(params);
+    
+    if (response._embedded.locations.length > 0) {
+      const location = response._embedded.locations[0];
+      const coordinates = {
+        lat: location.latitude,
+        lon: location.longitude
+      };
+      
+      // Зберігаємо в кеш
+      geocodeCache.set(cacheKey, coordinates);
+      
+      console.log(`✅ Геокодування успішне: ${searchQuery} → ${coordinates.lat}, ${coordinates.lon}`);
+      return coordinates;
+    } else {
+      console.warn(`⚠️ Локацію не знайдено: ${searchQuery}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Помилка геокодування ${searchQuery}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Пре-геокодування всіх оферів перед початком пошуку
+ * Це критично важливо для продуктивності - інакше геокодування в циклі займе вічність
+ */
+async function preGeocodeOffers(offers: FreightOffer[]): Promise<GeocodedOffer[]> {
+  console.log(`🌍 Початок пре-геокодування ${offers.length} оферів...`);
+  const startTime = Date.now();
+  
+  const geocodedOffers: GeocodedOffer[] = [];
+  const errors: string[] = [];
+  
+  // Обробляємо офери паралельно для швидкості
+  const batchSize = 10; // Обмежуємо кількість одночасних запитів
+  
+  for (let i = 0; i < offers.length; i += batchSize) {
+    const batch = offers.slice(i, i + batchSize);
+    
+    const batchPromises = batch.map(async (offer) => {
+      try {
+        const loading = getLoadingCoordinates(offer);
+        const unloading = getUnloadingCoordinates(offer);
+        
+        // Геокодуємо обидві точки паралельно
+        const [loadingCoords, unloadingCoords] = await Promise.all([
+          // Якщо координати вже є - використовуємо їх, інакше геокодуємо
+          loading.lat && loading.lon 
+            ? Promise.resolve({ lat: loading.lat, lon: loading.lon })
+            : geocodeLocation(loading.locality, loading.country, loading.postalCode),
+          unloading.lat && unloading.lon
+            ? Promise.resolve({ lat: unloading.lat, lon: unloading.lon })
+            : geocodeLocation(unloading.locality, unloading.country, unloading.postalCode)
+        ]);
+        
+        if (!loadingCoords || !unloadingCoords) {
+          throw new Error(`Не вдалося геокодувати точки: ${loading.location} або ${unloading.location}`);
+        }
+        
+        const geocodedOffer: GeocodedOffer = {
+          ...offer,
+          _geocoded: {
+            loading: {
+              lat: loadingCoords.lat,
+              lon: loadingCoords.lon,
+              location: loading.location
+            },
+            unloading: {
+              lat: unloadingCoords.lat,
+              lon: unloadingCoords.lon,
+              location: unloading.location
+            }
+          }
+        };
+        
+        return geocodedOffer;
+      } catch (error) {
+        const errorMsg = `Офер ${offer.id}: ${error instanceof Error ? error.message : String(error)}`;
+        errors.push(errorMsg);
+        console.warn(`⚠️ Пропускаємо офер ${offer.id} через помилку геокодування:`, error);
+        return null;
+      }
+    });
+    
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Додаємо успішно геокодовані офери
+    for (const result of batchResults) {
+      if (result) {
+        geocodedOffers.push(result);
+      }
+    }
+    
+    console.log(`🌍 Геокодовано батч ${Math.min(i + batchSize, offers.length)}/${offers.length} оферів`);
+  }
+  
+  const geocodingTime = Date.now() - startTime;
+  console.log(`✅ Пре-геокодування завершено за ${geocodingTime}ms`);
+  console.log(`📊 Успішно геокодовано: ${geocodedOffers.length}/${offers.length} оферів`);
+  
+  if (errors.length > 0) {
+    console.warn(`⚠️ Помилки геокодування для ${errors.length} оферів`);
+  }
+  
+  if (geocodedOffers.length === 0) {
+    throw new Error(`❌ Жоден офер не вдалося геокодувати. Перевірте доступність Trans.eu API та правильність адрес.`);
+  }
+  
+  return geocodedOffers;
+}
+
+/**
+ * Побудова маршруту з геокодованих оферів (швидка версія без async геокодування)
+ */
+async function buildRouteFromGeocoded(offers: GeocodedOffer[], config: OptimizationConfig): Promise<RouteCandidate> {
+  const segments: RouteSegment[] = [];
+  let totalDistance = 0;
+  let loadedDistance = 0;
+  let totalEmptyDistance = 0;
+  let totalEarnings = 0;
+
+  try {
+    // 1. Відстань від дому до першої точки завантаження (порожній пробіг)
+    let homeToFirstLoadingDistance = 0;
+    if (offers.length > 0) {
+      const homeBaseCoords = {
+        lat: config.homeBase.latitude,
+        lon: config.homeBase.longitude
+      };
+      
+      homeToFirstLoadingDistance = calculateDistanceFast(homeBaseCoords, offers[0]._geocoded.loading);
+      totalEmptyDistance += homeToFirstLoadingDistance;
+      totalDistance += homeToFirstLoadingDistance;
+      console.log(`🏠→📦 Дім до першого завантаження: ${homeToFirstLoadingDistance} км (порожній)`);
+    }
+
+    // 2. Обробляємо кожну пропозицію
+    for (let i = 0; i < offers.length; i++) {
+      const offer = offers[i];
+      let emptyDistanceToReach = 0;
+
+      // Якщо це не перша пропозиція, розраховуємо порожню відстань до неї
+      if (i > 0) {
+        emptyDistanceToReach = calculateDistanceFast(
+          offers[i - 1]._geocoded.unloading, 
+          offer._geocoded.loading
+        );
+        totalEmptyDistance += emptyDistanceToReach;
+        totalDistance += emptyDistanceToReach;
+        console.log(`🚛→📦 Переїзд ${i-1}→${i}: ${emptyDistanceToReach} км (порожній)`);
+      }
+
+      // Розраховуємо завантажену відстань
+      let offerLoadedDistance = 0;
+      if (offer.freight.route.distance) {
+        offerLoadedDistance = offer.freight.route.distance / 1000; // конвертуємо з метрів в км
+      } else {
+        offerLoadedDistance = calculateDistanceFast(offer._geocoded.loading, offer._geocoded.unloading);
+      }
+
+      // Створюємо сегмент
+      const drivingHours = offerLoadedDistance / config.averageSpeedKmh;
+      const restStops = Math.floor(drivingHours / 4.5);
+      
+      const segment: RouteSegment = {
+        offer,
+        from: offer._geocoded.loading.location,
+        to: offer._geocoded.unloading.location,
+        distanceKm: offerLoadedDistance,
+        loadingDate: getLoadingDate(offer),
+        unloadingDate: getUnloadingDate(offer),
+        pricePerKm: offer.price.value ? offer.price.value / offerLoadedDistance : null,
+        isEmpty: false,
+        emptyDistanceKm: emptyDistanceToReach,
+        drivingHours,
+        restStops
+      };
+      
+      segments.push(segment);
+
+      // Додаємо до загальних показників
+      loadedDistance += offerLoadedDistance;
+      totalDistance += offerLoadedDistance;
+      console.log(`📦→🏭 Завантажений сегмент ${i}: ${offerLoadedDistance} км (оплачується)`);
+      
+      if (offer.price.value) {
+        totalEarnings += offer.price.value;
+      }
+    }
+
+    // 3. Відстань повернення додому (порожній пробіг)
+    let lastUnloadingToHomeDistance = 0;
+    if (offers.length > 0) {
+      const homeBaseCoords = {
+        lat: config.homeBase.latitude,
+        lon: config.homeBase.longitude
+      };
+      
+      lastUnloadingToHomeDistance = calculateDistanceFast(
+        offers[offers.length - 1]._geocoded.unloading, 
+        homeBaseCoords
+      );
+      totalEmptyDistance += lastUnloadingToHomeDistance;
+      totalDistance += lastUnloadingToHomeDistance;
+      console.log(`🏭→🏠 Останнє розвантаження до дому: ${lastUnloadingToHomeDistance} км (порожній)`);
+    }
+
+    // 4. Розрахунок відсотка порожнього пробігу від ЗАГАЛЬНОЇ відстані
+    const emptyRunPercent = totalDistance > 0 ? (totalEmptyDistance / totalDistance) * 100 : 0;
+
+    // 5. Розрахунок score (вищий = кращий)
+    const score = loadedDistance * 10 - totalEmptyDistance * 3 + totalEarnings * 0.1;
+
+    console.log(`📊 Маршрут з ${offers.length} оферів:`);
+    console.log(`   📏 Загальна відстань: ${totalDistance.toFixed(1)} км`);
+    console.log(`   📦 Завантажена відстань: ${loadedDistance.toFixed(1)} км`);
+    console.log(`   🚛 Порожній пробіг: ${totalEmptyDistance.toFixed(1)} км (${emptyRunPercent.toFixed(1)}%)`);
+    console.log(`   💰 Заробіток: ${totalEarnings.toFixed(2)} EUR`);
+    console.log(`   ⭐ Score: ${score.toFixed(2)}`);
+
+    return {
+      offers,
+      totalDistance,
+      loadedDistance,
+      totalEmptyDistance,
+      emptyRunPercent,
+      totalEarnings,
+      score
+    };
+  } catch (error) {
+    console.error(`❌ Помилка побудови маршруту з геокодованих оферів [${offers.map(o => o.id).join(', ')}]:`, error);
+    throw new Error(`Неможливо побудувати маршрут: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Знаходження найкращих стартових оферів (оптимізована версія для геокодованих оферів)
+ */
+async function findBestStartingOffersGeocoded(
+  offers: GeocodedOffer[], 
+  homeBase: RoutePoint, 
+  maxDistance: number = 300,
+  maxCount: number = 20
+): Promise<Array<{ offer: GeocodedOffer; distance: number; score: number }>> {
+  const candidates: Array<{ offer: GeocodedOffer; distance: number; score: number }> = [];
+  
+  const homeBaseCoords = {
+    lat: homeBase.latitude,
+    lon: homeBase.longitude
+  };
+  
+  for (const offer of offers) {
+    // ШВИДКИЙ розрахунок відстані без async (координати вже є!)
+    const distance = calculateDistanceFast(homeBaseCoords, offer._geocoded.loading);
+    
+    if (distance <= maxDistance) {
+      // Розраховуємо score для стартового офера
+      const earnings = offer.price.value || 0;
+      const loadedDistance = offer.freight.route.distance ? offer.freight.route.distance / 1000 : 100; // fallback
+      const pricePerKm = earnings / loadedDistance;
+      
+      // Score: більше заробіток, менше відстань від дому, вища ціна за км
+      const score = earnings * 0.1 - distance * 0.5 + pricePerKm * 10;
+      
+      candidates.push({ offer, distance, score });
+    }
+  }
+  
+  // Сортуємо за score (найкращі спочатку) і обмежуємо кількість
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxCount);
+}
+
+/**
+ * Знаходження оферів поблизу домашньої бази для розвантаження (оптимізована версія)
+ */
+async function findOffersNearHomeUnloadingGeocoded(
+  offers: GeocodedOffer[], 
+  homeBase: RoutePoint, 
+  maxDistance: number = 200
+): Promise<Array<{ offer: GeocodedOffer; distance: number }>> {
+  const results: Array<{ offer: GeocodedOffer; distance: number }> = [];
+  
+  console.log(`🔍 Пошук оферів поблизу дому (розвантаження) в радіусі ${maxDistance} км...`);
+  
+  const homeBaseCoords = {
+    lat: homeBase.latitude,
+    lon: homeBase.longitude
+  };
+  
+  for (const offer of offers) {
+    // ШВИДКИЙ розрахунок відстані без async (координати вже є!)
+    const distance = calculateDistanceFast(offer._geocoded.unloading, homeBaseCoords);
+    
+    if (distance <= maxDistance && distance > 0) {
+      results.push({ offer, distance });
+    }
+  }
+  
+  console.log(`📍 Знайдено ${results.length} оферів для розвантаження поблизу дому`);
+  return results.sort((a, b) => a.distance - b.distance);
+}
+
+/**
+ * Оптимізована рекурсивна функція для пошуку маршрутів (без async геокодування в циклі!)
+ */
+async function findRoutesRecursivelyOptimized(state: RouteSearchState): Promise<void> {
+  const { currentRoute, usedOfferIds, availableOffers, endOffers, config, startTime, foundRoutes } = state;
+  
+  // Перевірка часу виконання
+  if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
+    console.log(`⏰ Досягнуто ліміт часу пошуку: ${config.maxSearchTimeMs}ms`);
+    return;
+  }
+
+  // Перевірка максимальної глибини
+  if (config.maxRouteDepth && currentRoute.length >= config.maxRouteDepth) {
+    console.log(`📏 Досягнуто максимальну глибину маршруту: ${config.maxRouteDepth}`);
+    return;
+  }
+
+  // Перевірка максимальної кількості результатів
+  if (config.maxResults && foundRoutes.length >= config.maxResults) {
+    console.log(`📊 Досягнуто максимальну кількість результатів: ${config.maxResults}`);
+    return;
+  }
+
+  const lastOffer = currentRoute[currentRoute.length - 1];
+
+  // 1. Спробуємо завершити маршрут (якщо останній офер розвантажується поблизу дому)
+  try {
+    const homeBaseCoords = {
+      lat: config.homeBase.latitude,
+      lon: config.homeBase.longitude
+    };
+    
+    // ШВИДКИЙ розрахунок відстані без async (координати вже є!)
+    const returnDistance = calculateDistanceFast(lastOffer._geocoded.unloading, homeBaseCoords);
+    
+    // Якщо повернення додому в межах розумного (300 км), це валідний кінець маршруту
+    if (returnDistance <= 300) {
+      try {
+        const route = await buildRouteFromGeocoded([...currentRoute], config);
+        foundRoutes.push(route);
+        console.log(`✅ Знайдено маршрут з ${currentRoute.length} оферів, score: ${route.score.toFixed(2)}, порожній пробіг: ${route.emptyRunPercent.toFixed(1)}%`);
+      } catch (error) {
+        console.warn(`⚠️ Помилка побудови маршруту з ${currentRoute.length} оферів:`, error);
+      }
+    }
+  } catch (error) {
+    console.warn(`⚠️ Помилка розрахунку відстані повернення додому:`, error);
+  }
+
+  // 2. Спробуємо продовжити маршрут (додати ще один офер)
+  const nextOfferCandidates: Array<{ offer: GeocodedOffer; distance: number }> = [];
+  
+  // Знаходимо всі доступні офери, які можна додати до поточного маршруту
+  for (const offer of availableOffers) {
+    if (usedOfferIds.has(offer.id)) continue;
+    
+    try {
+      // ШВИДКИЙ розрахунок відстані без async (координати вже є!)
+      const emptyDistance = calculateDistanceFast(
+        lastOffer._geocoded.unloading, 
+        offer._geocoded.loading
+      );
+      
+      // Перевіряємо обмеження
+      const maxEmptyDistance = config.maxEmptyDistanceKm || 200;
+      if (emptyDistance > maxEmptyDistance) continue;
+      
+      // Перевіряємо часові обмеження
+      if (!isTimeValid(lastOffer, offer)) continue;
+      
+      nextOfferCandidates.push({ offer, distance: emptyDistance });
+    } catch (error) {
+      console.warn(`⚠️ Пропускаємо офер ${offer.id} через помилку розрахунку відстані:`, error);
+    }
+  }
+
+  // Сортуємо кандидатів за відстанню (найближчі спочатку)
+  nextOfferCandidates.sort((a, b) => a.distance - b.distance);
+
+  // Обмежуємо кількість кандидатів для оптимізації продуктивності
+  const maxCandidates = Math.max(10, Math.floor(50 / (currentRoute.length + 1))); // Менше кандидатів для довших маршрутів
+  const limitedCandidates = nextOfferCandidates.slice(0, maxCandidates);
+
+  console.log(`🔍 Маршрут глибини ${currentRoute.length}: знайдено ${limitedCandidates.length} кандидатів для продовження`);
+
+  // 3. Рекурсивно досліджуємо кожного кандидата
+  for (const candidate of limitedCandidates) {
+    // Перевірка часу виконання перед кожною рекурсією
+    if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
+      break;
+    }
+
+    const newRoute = [...currentRoute, candidate.offer];
+    const newUsedIds = new Set(usedOfferIds);
+    newUsedIds.add(candidate.offer.id);
+
+    const newState: RouteSearchState = {
+      currentRoute: newRoute,
+      usedOfferIds: newUsedIds,
+      availableOffers,
+      endOffers,
+      config,
+      startTime,
+      foundRoutes
+    };
+
+    await findRoutesRecursivelyOptimized(newState);
+  }
+}
+
+/**
+ * Конвертація кандидата в OptimizedRoute з геокодованих оферів
+ */
+async function convertToOptimizedRouteFromGeocoded(candidate: RouteCandidate, config: OptimizationConfig): Promise<OptimizedRoute> {
+  const segments: RouteSegment[] = [];
+  
+  for (let index = 0; index < candidate.offers.length; index++) {
+    const offer = candidate.offers[index] as GeocodedOffer;
+    let emptyDistanceToReach = 0;
+    
+    if (index === 0) {
+      const homeBaseCoords = {
+        lat: config.homeBase.latitude,
+        lon: config.homeBase.longitude
+      };
+      emptyDistanceToReach = calculateDistanceFast(homeBaseCoords, offer._geocoded.loading);
+    } else {
+      const prevOffer = candidate.offers[index - 1] as GeocodedOffer;
+      emptyDistanceToReach = calculateDistanceFast(prevOffer._geocoded.unloading, offer._geocoded.loading);
+    }
+    
+    // Розраховуємо завантажену відстань
+    let offerLoadedDistance = 0;
+    if (offer.freight.route.distance) {
+      offerLoadedDistance = offer.freight.route.distance / 1000;
+    } else {
+      offerLoadedDistance = calculateDistanceFast(offer._geocoded.loading, offer._geocoded.unloading);
+    }
+
+    const drivingHours = offerLoadedDistance / config.averageSpeedKmh;
+    const restStops = Math.floor(drivingHours / 4.5);
+    
+    const segment: RouteSegment = {
+      offer,
+      from: offer._geocoded.loading.location,
+      to: offer._geocoded.unloading.location,
+      distanceKm: offerLoadedDistance,
+      loadingDate: getLoadingDate(offer),
+      unloadingDate: getUnloadingDate(offer),
+      pricePerKm: offer.price.value ? offer.price.value / offerLoadedDistance : null,
+      isEmpty: false,
+      emptyDistanceKm: emptyDistanceToReach,
+      drivingHours,
+      restStops
+    };
+    
+    segments.push(segment);
+  }
+
+  const totalDrivingHours = segments.reduce((sum, seg) => sum + seg.drivingHours, 0);
+  const totalDays = Math.max(1, totalDrivingHours / 8); 
+  const mandatoryBreaks = segments.reduce((sum, seg) => sum + seg.restStops, 0);
+  const totalRestHours = mandatoryBreaks * 0.75; 
+  const idleHours = Math.max(0, totalDays * 24 - totalDrivingHours - totalRestHours - (totalDays * 11)); 
+  const weeklyRestsNeeded = Math.floor(totalDays / 7);
+
+  const avgDailyDriving = totalDrivingHours / totalDays;
+  const euCompliant = avgDailyDriving <= 9 && candidate.emptyRunPercent <= config.maxEmptyRunPercent;
+
+  return {
+    segments,
+    totalDistanceKm: candidate.totalDistance,
+    loadedDistanceKm: candidate.loadedDistance,
+    emptyDistanceKm: candidate.totalEmptyDistance,
+    emptyRunPercent: candidate.emptyRunPercent,
+    totalDays,
+    idleHours,
+    totalDrivingHours,
+    totalRestHours,
+    mandatoryBreaks,
+    weeklyRestsNeeded,
+    score: candidate.score,
+    euCompliant
+  };
+}
+
+/**
+ * ПОМИЛКА: Відстань має розраховуватися виключно через API endpoints
+ * Ця функція більше не повинна використовуватися для розрахунку відстаней
+ */
+async function throwDistanceCalculationError(
+  from: { locality: string; country: string },
+  to: { locality: string; country: string }
+): Promise<never> {
+  throw new Error(`❌ Розрахунок відстані заборонено. Відстань між ${from.locality}, ${from.country} та ${to.locality}, ${to.country} має бути отримана виключно з API endpoints, а не розрахована локально.`);
+}
+
+/**
+ * Отримання координат та адреси точки завантаження з пропозиції
+ */
+function getLoadingCoordinates(offer: FreightOffer): { 
+  lat?: number; 
+  lon?: number; 
+  locality: string; 
+  country: string; 
+  postalCode?: string;
+  location: string;
+} {
+  const loadingSpot = offer.freight.spots.find(spot => 
+    spot.operations.some(op => op.type === 'loading')
+  );
+  
+  const spot = loadingSpot || offer.freight.spots[0];
+  
+  return {
+    lat: spot.place.coordinates?.latitude,
+    lon: spot.place.coordinates?.longitude,
+    locality: spot.place.address.locality,
+    country: spot.place.address.country,
+    postalCode: spot.place.address.postal_code,
+    location: `${spot.place.address.locality}, ${spot.place.address.country}`
+  };
+}
+
+/**
+ * Отримання координат та адреси точки розвантаження з пропозиції
+ */
+function getUnloadingCoordinates(offer: FreightOffer): { 
+  lat?: number; 
+  lon?: number; 
+  locality: string; 
+  country: string; 
+  postalCode?: string;
+  location: string;
+} {
+  const unloadingSpot = offer.freight.spots.find(spot => 
+    spot.operations.some(op => op.type === 'unloading')
+  );
+  
+  const spot = unloadingSpot || offer.freight.spots[offer.freight.spots.length - 1];
+  
+  return {
+    lat: spot.place.coordinates?.latitude,
+    lon: spot.place.coordinates?.longitude,
+    locality: spot.place.address.locality,
+    country: spot.place.address.country,
+    postalCode: spot.place.address.postal_code,
+    location: `${spot.place.address.locality}, ${spot.place.address.country}`
+  };
+}
+
+/**
+ * Отримання дати завантаження з пропозиції
+ */
+function getLoadingDate(offer: FreightOffer): string {
+  const loadingSpot = offer.freight.spots.find(spot => 
+    spot.operations.some(op => op.type === 'loading')
+  );
+  
+  if (loadingSpot) {
+    const loadingOp = loadingSpot.operations.find(op => op.type === 'loading');
+    if (loadingOp) {
+      return loadingOp.timespan.begin;
+    }
+  }
+  
+  // Fallback до першої операції
+  return offer.freight.spots[0].operations[0].timespan.begin;
+}
+
+/**
+ * Отримання дати розвантаження з пропозиції
+ */
+function getUnloadingDate(offer: FreightOffer): string {
+  const unloadingSpot = offer.freight.spots.find(spot => 
+    spot.operations.some(op => op.type === 'unloading')
+  );
+  
+  if (unloadingSpot) {
+    const unloadingOp = unloadingSpot.operations.find(op => op.type === 'unloading');
+    if (unloadingOp) {
+      return unloadingOp.timespan.end;
+    }
+  }
+  
+  // Fallback до останньої операції
+  const lastSpot = offer.freight.spots[offer.freight.spots.length - 1];
+  return lastSpot.operations[lastSpot.operations.length - 1].timespan.end;
+}
+
+/**
+ * Перевірка, чи можна взяти наступний офер після поточного:
+ * 1. Наступний офер має завантажуватися в той самий ДЕНЬ або пізніше (порівнюємо тільки дати)
+ * 2. Години гнучкі — можна домовитись з клієнтом
+ */
+function isTimeValid(
+  currentOffer: FreightOffer, 
+  nextOffer: FreightOffer
+): boolean {
+  const unloadTimeStr = getUnloadingDate(currentOffer);
+  const loadTimeStr = getLoadingDate(nextOffer);
+  
+  if (!unloadTimeStr || !loadTimeStr) return true; // Якщо немає дат — дозволяємо
+
+  const unloadDate = new Date(unloadTimeStr);
+  const loadDate = new Date(loadTimeStr);
+
+  // Порівнюємо тільки ДАТИ (без годин), оскільки години гнучкі
+  const unloadDay = new Date(unloadDate.getFullYear(), unloadDate.getMonth(), unloadDate.getDate());
+  const loadDay = new Date(loadDate.getFullYear(), loadDate.getMonth(), loadDate.getDate());
+
+  // Наступний офер має бути в той самий день або пізніше (не раніше за днем)
+  if (loadDay < unloadDay) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Створення сегмента маршруту з пропозиції з покращеним розрахунком відстані
+ */
+async function createRouteSegment(
+  offer: FreightOffer, 
+  config: OptimizationConfig,
+  emptyDistanceToReach: number = 0
+): Promise<RouteSegment> {
+  const loading = getLoadingCoordinates(offer);
+  const unloading = getUnloadingCoordinates(offer);
+  
+  // Спочатку намагаємося використати відстань з API
+  let loadedDistance = 0;
+  if (offer.freight.route.distance) {
+    loadedDistance = offer.freight.route.distance / 1000; // конвертуємо з метрів в км
+    console.log(`📏 Використовуємо відстань з API: ${loadedDistance} км`);
+  } else {
+    // Якщо відстані немає в API, кидаємо помилку - відстань має бути тільки з API
+    console.log(`❌ Відстань відсутня в API для офера ${offer.id}: ${loading.location} → ${unloading.location}`);
+    await throwDistanceCalculationError(loading, unloading);
+  }
+  
+  const drivingHours = loadedDistance / config.averageSpeedKmh;
+  const restStops = Math.floor(drivingHours / 4.5); // перерва кожні 4.5 години
+  
+  return {
+    offer,
+    from: loading.location,
+    to: unloading.location,
+    distanceKm: loadedDistance,
+    loadingDate: getLoadingDate(offer),
+    unloadingDate: getUnloadingDate(offer),
+    pricePerKm: offer.price.value ? offer.price.value / loadedDistance : null,
+    isEmpty: false,
+    emptyDistanceKm: emptyDistanceToReach,
+    drivingHours,
+    restStops
+  };
+}
+
+/**
+ * ЗАСТАРІЛА ФУНКЦІЯ: Пошук пропозицій поблизу домашньої бази більше не підтримується
+ * Відстані мають розраховуватися виключно через API endpoints
+ */
+async function findOffersNearHomeUnloading(offers: FreightOffer[], homeBase: RoutePoint, maxDistance: number = 200): Promise<Array<{ offer: FreightOffer; distance: number }>> {
+  console.log(`❌ Функція findOffersNearHomeUnloading застаріла - відстані мають розраховуватися через API endpoints`);
+  throw new Error(`❌ Пошук оферів поблизу дому заборонено. Відстані мають бути отримані виключно з API endpoints.`);
+}
+
+/**
+ * Рекурсивний пошук оптимальних маршрутів будь-якої довжини
+ */
+interface RouteSearchState {
+  currentRoute: GeocodedOffer[];
+  usedOfferIds: Set<string>;
+  availableOffers: GeocodedOffer[];
+  endOffers: Array<{ offer: GeocodedOffer; distance: number }>;
+  config: OptimizationConfig;
+  startTime: number;
+  foundRoutes: RouteCandidate[];
+}
+
+/**
+ * Рекурсивна функція для пошуку маршрутів
+ */
+async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
+  const { currentRoute, usedOfferIds, availableOffers, endOffers, config, startTime, foundRoutes } = state;
+  
+  // Перевірка часу виконання
+  if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
+    console.log(`⏰ Досягнуто ліміт часу пошуку: ${config.maxSearchTimeMs}ms`);
+    return;
+  }
+
+  // Перевірка максимальної глибини
+  if (config.maxRouteDepth && currentRoute.length >= config.maxRouteDepth) {
+    console.log(`📏 Досягнуто максимальну глибину маршруту: ${config.maxRouteDepth}`);
+    return;
+  }
+
+  // Перевірка максимальної кількості результатів
+  if (config.maxResults && foundRoutes.length >= config.maxResults) {
+    console.log(`📊 Досягнуто максимальну кількість результатів: ${config.maxResults}`);
+    return;
+  }
+
+  const lastOffer = currentRoute[currentRoute.length - 1];
+  const lastUnloading = getUnloadingCoordinates(lastOffer);
+
+  // 1. Спробуємо завершити маршрут (якщо останній офер розвантажується поблизу дому)
+  try {
+    const homeBaseCoords = {
+      lat: config.homeBase.latitude,
+      lon: config.homeBase.longitude,
+      locality: config.homeBase.locality,
+      country: config.homeBase.country,
+      postalCode: config.homeBase.postalCode
+    };
+    
+    await throwDistanceCalculationError(lastUnloading, homeBaseCoords);
+    
+    // Якщо повернення додому в межах розумного (300 км), це валідний кінець маршруту
+    if (returnDistance <= 300) {
+      try {
+        const route = await buildRoute([...currentRoute], config);
+        // НЕ фільтруємо за порожнім пробігом тут - тільки додаємо до результатів
+        foundRoutes.push(route);
+        console.log(`✅ Знайдено маршрут з ${currentRoute.length} оферів, score: ${route.score.toFixed(2)}, порожній пробіг: ${route.emptyRunPercent.toFixed(1)}%`);
+      } catch (error) {
+        console.warn(`⚠️ Помилка побудови маршруту з ${currentRoute.length} оферів:`, error);
+      }
+    }
+  } catch (error) {
+    console.warn(`⚠️ Помилка розрахунку відстані повернення додому:`, error);
+  }
+
+  // 2. Спробуємо продовжити маршрут (додати ще один офер)
+  const nextOfferCandidates: Array<{ offer: FreightOffer; distance: number }> = [];
+  
+  // Знаходимо всі доступні офери, які можна додати до поточного маршруту
+  for (const offer of availableOffers) {
+    if (usedOfferIds.has(offer.id)) continue;
+    
+    try {
+      const nextLoading = getLoadingCoordinates(offer);
+      await throwDistanceCalculationError(lastUnloading, nextLoading);
+      
+      // Перевіряємо обмеження
+      const maxEmptyDistance = config.maxEmptyDistanceKm || 200;
+      if (emptyDistance > maxEmptyDistance) continue;
+      
+      // Перевіряємо часові обмеження
+      if (!isTimeValid(lastOffer, offer)) continue;
+      
+      nextOfferCandidates.push({ offer, distance: emptyDistance });
+    } catch (error) {
+      console.warn(`⚠️ Пропускаємо офер ${offer.id} через помилку геокодування:`, error);
+    }
+  }
+
+  // Сортуємо кандидатів за відстанню (найближчі спочатку)
+  nextOfferCandidates.sort((a, b) => a.distance - b.distance);
+
+  // Обмежуємо кількість кандидатів для оптимізації продуктивності
+  const maxCandidates = Math.max(10, Math.floor(50 / (currentRoute.length + 1))); // Менше кандидатів для довших маршрутів
+  const limitedCandidates = nextOfferCandidates.slice(0, maxCandidates);
+
+  console.log(`🔍 Маршрут глибини ${currentRoute.length}: знайдено ${limitedCandidates.length} кандидатів для продовження`);
+
+  // 3. Рекурсивно досліджуємо кожного кандидата
+  for (const candidate of limitedCandidates) {
+    // Перевірка часу виконання перед кожною рекурсією
+    if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
+      break;
+    }
+
+    const newRoute = [...currentRoute, candidate.offer];
+    const newUsedIds = new Set(usedOfferIds);
+    newUsedIds.add(candidate.offer.id);
+
+    const newState: RouteSearchState = {
+      currentRoute: newRoute,
+      usedOfferIds: newUsedIds,
+      availableOffers,
+      endOffers,
+      config,
+      startTime,
+      foundRoutes
+    };
+
+    await findRoutesRecursively(newState);
+  }
+}
+
+/**
+ * ЗАСТАРІЛА ФУНКЦІЯ: Пошук найкращих стартових оферів більше не підтримується
+ * Відстані мають розраховуватися виключно через API endpoints
+ */
+async function findBestStartingOffers(
+  offers: FreightOffer[], 
+  homeBase: RoutePoint, 
+  maxDistance: number = 300,
+  maxCount: number = 20
+): Promise<Array<{ offer: FreightOffer; distance: number; score: number }>> {
+  console.log(`❌ Функція findBestStartingOffers застаріла - відстані мають розраховуватися через API endpoints`);
+  throw new Error(`❌ Пошук стартових оферів заборонено. Відстані мають бути отримані виключно з API endpoints.`);
+}
+
+/**
+ * ЗАСТАРІЛА ФУНКЦІЯ: Розрахунок відстані повернення додому більше не підтримується
+ * Відстані мають розраховуватися виключно через API endpoints
+ */
+async function calculateReturnDistance(lastOffer: FreightOffer, homeBase: RoutePoint): Promise<never> {
+  const unloading = getUnloadingCoordinates(lastOffer);
+  
+  const homeBaseCoords = {
+    locality: homeBase.locality,
+    country: homeBase.country
+  };
+  
+  await throwDistanceCalculationError(unloading, homeBaseCoords);
+}
+
+/**
+ * Побудова маршруту з ланцюжка пропозицій з правильним розрахунком порожнього пробігу
+ * Порожній пробіг = ВСЕ що не оплачується: дім→завантаження + переїзди + розвантаження→дім
+ * Фільтрація за відсотком порожнього пробігу відбувається тільки на фінальному етапі
+ */
+async function buildRoute(offers: FreightOffer[], config: OptimizationConfig): Promise<RouteCandidate> {
+  const segments: RouteSegment[] = [];
+  let totalDistance = 0;
+  let loadedDistance = 0;
+  let totalEmptyDistance = 0; // Весь порожній пробіг
+  let totalEarnings = 0;
+
+  try {
+    // 1. Відстань від дому до першої точки завантаження (порожній пробіг)
+    let homeToFirstLoadingDistance = 0;
+    if (offers.length > 0) {
+      const firstLoading = getLoadingCoordinates(offers[0]);
+      const homeBaseCoords = {
+        lat: config.homeBase.latitude,
+        lon: config.homeBase.longitude,
+        locality: config.homeBase.locality,
+        country: config.homeBase.country,
+        postalCode: config.homeBase.postalCode
+      };
+      
+      await throwDistanceCalculationError(homeBaseCoords, firstLoading);
+      totalEmptyDistance += homeToFirstLoadingDistance;
+      totalDistance += homeToFirstLoadingDistance;
+      console.log(`🏠→📦 Дім до першого завантаження: ${homeToFirstLoadingDistance} км (порожній)`);
+    }
+
+    // 2. Обробляємо кожну пропозицію
+    for (let i = 0; i < offers.length; i++) {
+      const offer = offers[i];
+      let emptyDistanceToReach = 0;
+
+      // Якщо це не перша пропозиція, розраховуємо порожню відстань до неї
+      if (i > 0) {
+        const prevUnloading = getUnloadingCoordinates(offers[i - 1]);
+        const currentLoading = getLoadingCoordinates(offer);
+        await throwDistanceCalculationError(prevUnloading, currentLoading);
+        totalEmptyDistance += emptyDistanceToReach; // Додаємо до загального порожнього пробігу
+        totalDistance += emptyDistanceToReach;
+        console.log(`�→📦 Переїзд ${i-1}→${i}: ${emptyDistanceToReach} км (порожній)`);
+      }
+
+      // Створюємо сегмент
+      const segment = await createRouteSegment(offer, config, emptyDistanceToReach);
+      segments.push(segment);
+
+      // Додаємо до загальних показників
+      loadedDistance += segment.distanceKm;
+      totalDistance += segment.distanceKm;
+      console.log(`📦→🏭 Завантажений сегмент ${i}: ${segment.distanceKm} км (оплачується)`);
+      
+      if (offer.price.value) {
+        totalEarnings += offer.price.value;
+      }
+    }
+
+    // 3. Відстань повернення додому (порожній пробіг)
+    let lastUnloadingToHomeDistance = 0;
+    if (offers.length > 0) {
+      lastUnloadingToHomeDistance = await calculateReturnDistance(offers[offers.length - 1], config.homeBase);
+      totalEmptyDistance += lastUnloadingToHomeDistance;
+      totalDistance += lastUnloadingToHomeDistance;
+      console.log(`🏭→🏠 Останнє розвантаження до дому: ${lastUnloadingToHomeDistance} км (порожній)`);
+    }
+
+    // 4. Розрахунок відсотка порожнього пробігу від ЗАГАЛЬНОЇ відстані
+    const emptyRunPercent = totalDistance > 0 ? (totalEmptyDistance / totalDistance) * 100 : 0;
+
+    // 5. Розрахунок score (вищий = кращий)
+    // Враховуємо: більше завантажених км, менше порожнього пробігу, більший прибуток
+    const score = loadedDistance * 10 - totalEmptyDistance * 3 + totalEarnings * 0.1;
+
+    console.log(`📊 Маршрут з ${offers.length} оферів:`);
+    console.log(`   📏 Загальна відстань: ${totalDistance.toFixed(1)} км`);
+    console.log(`   📦 Завантажена відстань: ${loadedDistance.toFixed(1)} км`);
+    console.log(`   🚛 Порожній пробіг: ${totalEmptyDistance.toFixed(1)} км (${emptyRunPercent.toFixed(1)}%)`);
+    console.log(`   💰 Заробіток: ${totalEarnings.toFixed(2)} EUR`);
+    console.log(`   ⭐ Score: ${score.toFixed(2)}`);
+
+    return {
+      offers,
+      totalDistance,
+      loadedDistance,
+      totalEmptyDistance,
+      emptyRunPercent,
+      totalEarnings,
+      score
+    };
+  } catch (error) {
+    console.error(`❌ Помилка побудови маршруту з оферів [${offers.map(o => o.id).join(', ')}]:`, error);
+    throw new Error(`Неможливо побудувати маршрут: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Конвертація кандидата в OptimizedRoute з правильним розрахунком порожнього пробігу
+ */
+async function convertToOptimizedRoute(candidate: RouteCandidate, config: OptimizationConfig): Promise<OptimizedRoute> {
+  const segments: RouteSegment[] = [];
+  
+  for (let index = 0; index < candidate.offers.length; index++) {
+    const offer = candidate.offers[index];
+    let emptyDistanceToReach = 0;
+    
+    if (index === 0) {
+      const firstLoading = getLoadingCoordinates(offer);
+      const homeBaseCoords = {
+        lat: config.homeBase.latitude,
+        lon: config.homeBase.longitude,
+        locality: config.homeBase.locality,
+        country: config.homeBase.country,
+        postalCode: config.homeBase.postalCode
+      };
+      await throwDistanceCalculationError(homeBaseCoords, firstLoading);
+    } else {
+      const prevUnloading = getUnloadingCoordinates(candidate.offers[index - 1]);
+      const currentLoading = getLoadingCoordinates(offer);
+      await throwDistanceCalculationError(prevUnloading, currentLoading);
+    }
+    
+    const segment = await createRouteSegment(offer, config, emptyDistanceToReach);
+    segments.push(segment);
+  }
+
+  const totalDrivingHours = segments.reduce((sum, seg) => sum + seg.drivingHours, 0);
+  const totalDays = Math.max(1, totalDrivingHours / 8); 
+  const mandatoryBreaks = segments.reduce((sum, seg) => sum + seg.restStops, 0);
+  const totalRestHours = mandatoryBreaks * 0.75; 
+  const idleHours = Math.max(0, totalDays * 24 - totalDrivingHours - totalRestHours - (totalDays * 11)); 
+  const weeklyRestsNeeded = Math.floor(totalDays / 7);
+
+  const avgDailyDriving = totalDrivingHours / totalDays;
+  const euCompliant = avgDailyDriving <= 9 && candidate.emptyRunPercent <= config.maxEmptyRunPercent;
+
+  return {
+    segments,
+    totalDistanceKm: candidate.totalDistance,
+    loadedDistanceKm: candidate.loadedDistance,
+    emptyDistanceKm: candidate.totalEmptyDistance, // Використовуємо правильний розрахунок
+    emptyRunPercent: candidate.emptyRunPercent,
+    totalDays,
+    idleHours,
+    totalDrivingHours,
+    totalRestHours,
+    mandatoryBreaks,
+    weeklyRestsNeeded,
+    score: candidate.score,
+    euCompliant
+  };
+}
+
+/**
+ * ЗАСТАРІЛА ФУНКЦІЯ: Оптимізація маршрутів більше не підтримується
+ * Відстані мають розраховуватися виключно через API endpoints
+ */
+/**
+ * Оптимізована функція оптимізації маршрутів з пре-геокодуванням
+ * Вирішує проблему продуктивності - геокодування робиться один раз перед пошуком
+ */
+export async function optimizeRoutesWithPreGeocoding(
+  offers: FreightOffer[], 
+  config: OptimizationConfig
+): Promise<OptimizedRoute[]> {
+  console.log(`🚀 Початок оптимізованої оптимізації маршрутів: ${offers.length} пропозицій`);
+  console.log(`🏠 Домашня база: ${config.homeBase.locality} (${config.homeBase.latitude}, ${config.homeBase.longitude})`);
+  console.log(`⚙️ Параметри: maxDepth=${config.maxRouteDepth || 'необмежено'}, maxEmptyDistance=${config.maxEmptyDistanceKm || 200}км, maxTime=${config.maxSearchTimeMs || 'необмежено'}ms`);
+  
+  if (offers.length === 0) return [];
+
+  const startTime = Date.now();
+  const foundRoutes: RouteCandidate[] = [];
+  const errors: string[] = [];
+  
+  try {
+    // 1. ПРЕ-ГЕОКОДУВАННЯ - це ключ до продуктивності!
+    console.log(`🌍 Етап 1: Пре-геокодування всіх оферів...`);
+    const geocodedOffers = await preGeocodeOffers(offers);
+    console.log(`✅ Геокодування завершено: ${geocodedOffers.length}/${offers.length} оферів готові`);
+
+    // 2. Знаходимо найкращі стартові офери (тепер швидко!)
+    const startingOffers = await findBestStartingOffersGeocoded(geocodedOffers, config.homeBase, 300, 15);
+    console.log(`📍 Знайдено ${startingOffers.length} найкращих стартових оферів`);
+
+    if (startingOffers.length === 0) {
+      throw new Error(`❌ Не знайдено жодної пропозиції для завантаження поблизу домашньої бази (${config.homeBase.locality}). Неможливо побудувати маршрути.`);
+    }
+
+    // 3. Знаходимо офери, які можуть завершувати маршрути (тепер швидко!)
+    const endOffers = await findOffersNearHomeUnloadingGeocoded(geocodedOffers, config.homeBase, 300);
+    console.log(`📍 Знайдено ${endOffers.length} оферів для завершення маршрутів`);
+
+    // 4. Рекурсивний пошук маршрутів для кожного стартового офера (тепер швидко!)
+    for (let i = 0; i < startingOffers.length; i++) {
+      const startingOffer = startingOffers[i];
+      
+      // Перевірка часу виконання
+      if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
+        console.log(`⏰ Досягнуто ліміт часу пошуку при обробці стартового офера ${i + 1}/${startingOffers.length}`);
+        break;
+      }
+
+      console.log(`🔄 Досліджуємо стартовий офер ${i + 1}/${startingOffers.length}: ${startingOffer.offer.id} (score: ${startingOffer.score.toFixed(2)})`);
+
+      try {
+        const initialState: RouteSearchState = {
+          currentRoute: [startingOffer.offer],
+          usedOfferIds: new Set([startingOffer.offer.id]),
+          availableOffers: geocodedOffers,
+          endOffers,
+          config,
+          startTime,
+          foundRoutes
+        };
+
+        await findRoutesRecursivelyOptimized(initialState);
+        
+        console.log(`✅ Завершено дослідження стартового офера ${startingOffer.offer.id}. Знайдено маршрутів: ${foundRoutes.length}`);
+        
+      } catch (error) {
+        const errorMsg = `Стартовий офер ${startingOffer.offer.id}: ${error instanceof Error ? error.message : String(error)}`;
+        errors.push(errorMsg);
+        console.warn(`⚠️ Помилка при дослідженні стартового офера ${startingOffer.offer.id}:`, error);
+      }
+
+      // Перевірка максимальної кількості результатів
+      if (config.maxResults && foundRoutes.length >= config.maxResults) {
+        console.log(`📊 Досягнуто максимальну кількість результатів: ${config.maxResults}`);
+        break;
+      }
+    }
+
+    const searchTime = Date.now() - startTime;
+    console.log(`🔧 Оптимізований пошук завершено за ${searchTime}ms. Створено ${foundRoutes.length} кандидатів маршрутів`);
+    
+    if (errors.length > 0) {
+      console.warn(`⚠️ Виникло ${errors.length} помилок під час побудови маршрутів`);
+    }
+
+    if (foundRoutes.length === 0) {
+      if (errors.length > 0) {
+        throw new Error(`❌ Жоден маршрут не вдалося побудувати через помилки геокодування. Перевірте доступність Trans.eu API та правильність адрес.`);
+      } else {
+        console.warn(`⚠️ Жоден маршрут не знайдено. Спробуйте збільшити maxEmptyRunPercent (зараз: ${config.maxEmptyRunPercent}%) або maxEmptyDistanceKm`);
+      }
+    }
+
+    // 5. ФІНАЛЬНА ФІЛЬТРАЦІЯ за відсотком порожнього пробігу
+    const validRoutes = foundRoutes.filter(route => {
+      const isValid = route.emptyRunPercent <= config.maxEmptyRunPercent;
+      if (!isValid) {
+        console.log(`🚫 Відфільтровано маршрут з ${route.offers.length} оферів: порожній пробіг ${route.emptyRunPercent.toFixed(1)}% > ${config.maxEmptyRunPercent}%`);
+      }
+      return isValid;
+    });
+
+    console.log(`🔍 Після фільтрації за порожнім пробігом: ${validRoutes.length}/${foundRoutes.length} маршрутів`);
+
+    if (validRoutes.length === 0) {
+      console.warn(`⚠️ Всі маршрути відфільтровано через високий відсоток порожнього пробігу. Спробуйте збільшити maxEmptyRunPercent (зараз: ${config.maxEmptyRunPercent}%)`);
+      return [];
+    }
+
+    // 6. Сортуємо за score та відбираємо найкращі
+    const sortedRoutes = validRoutes
+      .sort((a, b) => b.score - a.score)
+      .slice(0, config.maxResults || 50);
+
+    console.log(`✅ Відібрано ${sortedRoutes.length} найкращих маршрутів`);
+    
+    // Статистика по довжині маршрутів
+    const routeLengthStats = sortedRoutes.reduce((stats, route) => {
+      const length = route.offers.length;
+      stats[length] = (stats[length] || 0) + 1;
+      return stats;
+    }, {} as Record<number, number>);
+    
+    console.log(`📊 Статистика довжини маршрутів:`, routeLengthStats);
+
+    // 7. Конвертуємо в OptimizedRoute
+    const optimizedRoutes: OptimizedRoute[] = [];
+    for (const candidate of sortedRoutes) {
+      try {
+        const optimizedRoute = await convertToOptimizedRouteFromGeocoded(candidate, config);
+        optimizedRoutes.push(optimizedRoute);
+      } catch (error) {
+        console.error(`❌ Помилка конвертації маршруту:`, error);
+        errors.push(`Конвертація маршруту: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`🎉 Оптимізована оптимізація завершена за ${totalTime}ms. Повернуто ${optimizedRoutes.length} оптимізованих маршрутів`);
+
+    return optimizedRoutes;
+
+  } catch (error) {
+    console.error(`❌ Критична помилка оптимізованої оптимізації маршрутів:`, error);
+    throw error;
+  }
+}
+
+    // 5. Сортуємо за score та відбираємо найкращі
+    const sortedRoutes = validRoutes
+      .sort((a, b) => b.score - a.score)
+      .slice(0, config.maxResults || 50);
+
+    console.log(`✅ Відібрано ${sortedRoutes.length} найкращих маршрутів`);
+    
+    // Статистика по довжині маршрутів
+    const routeLengthStats = sortedRoutes.reduce((stats, route) => {
+      const length = route.offers.length;
+      stats[length] = (stats[length] || 0) + 1;
+      return stats;
+    }, {} as Record<number, number>);
+    
+    console.log(`📊 Статистика довжини маршрутів:`, routeLengthStats);
+
+    // 5. Конвертуємо в OptimizedRoute
+    const optimizedRoutes: OptimizedRoute[] = [];
+    for (const candidate of sortedRoutes) {
+      try {
+        const optimizedRoute = await convertToOptimizedRoute(candidate, config);
+        optimizedRoutes.push(optimizedRoute);
+      } catch (error) {
+        console.error(`❌ Помилка конвертації маршруту:`, error);
+        errors.push(`Конвертація маршруту: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`🎉 Оптимізація завершена за ${totalTime}ms. Повернуто ${optimizedRoutes.length} оптимізованих маршрутів`);
+
+    return optimizedRoutes;
+
+  } catch (error) {
+    console.error(`❌ Критична помилка рекурсивної оптимізації маршрутів:`, error);
+    throw error;
+  }
+}
+
+/**
+ * ЗАСТАРІЛА ФУНКЦІЯ: Створення оптимізованих маршрутів більше не підтримується
+ * Відстані мають розраховуватися виключно через API endpoints
+ */
+/**
+ * Оптимізована експортована функція для використання в useRouteManagement
+ * Використовує пре-геокодування для максимальної продуктивності
+ */
+export async function createOptimizedRoutes(
+  offers: FreightOffer[],
+  homeBase: RoutePoint,
+  maxEmptyRunPercent: number = 10,
+  pricePerKm: number = 1.5,
+  averageSpeedKmh: number = 80,
+  maxResults?: number,
+  maxRouteDepth?: number,
+  maxEmptyDistanceKm?: number,
+  maxSearchTimeMs?: number
+): Promise<OptimizedRoute[]> {
+  const config: OptimizationConfig = {
+    homeBase,
+    maxEmptyRunPercent,
+    pricePerKm,
+    averageSpeedKmh,
+    maxResults: maxResults || 50,
+    maxRouteDepth: maxRouteDepth || 10, // За замовчуванням до 10 оферів в маршруті
+    maxEmptyDistanceKm: maxEmptyDistanceKm || 200, // За замовчуванням до 200 км порожнього пробігу
+    maxSearchTimeMs: maxSearchTimeMs || 30000 // За замовчуванням 30 секунд пошуку
+  };
+
+  return await optimizeRoutesWithPreGeocoding(offers, config);
+}

@@ -24,6 +24,7 @@ function App() {
   const [config, setConfig] = useState<RouteConfig | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('offers');
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [extensionVehicleTypes, setExtensionVehicleTypes] = useState<string[]>([]);
 
   // Initialize token from storage or URL parameters on app load
   useEffect(() => {
@@ -65,7 +66,7 @@ function App() {
     aiStatus,
     searchProgress,
     handleFetch,
-    handleOptimizeRoutes, // Додаємо новий метод
+    handleOptimizeRoutes,
   } = useRouteManagement({ config });
 
   // Extension messaging hook
@@ -80,6 +81,7 @@ function App() {
       } : null);
     },
     onSearchStatusChange: setSearchStatus,
+    onExtensionVehicleTypesReceived: setExtensionVehicleTypes,
   });
 
   // Handle offer row click
@@ -120,6 +122,7 @@ function App() {
           onChange={setConfig}
           onFetch={handleFetch}
           loading={loading}
+          extensionVehicleTypes={extensionVehicleTypes}
         />
       </aside>
 
@@ -166,7 +169,6 @@ function App() {
             routes={routes} 
             homeBase={config?.routes?.find(point => point.type === RoutePointType.HOME_POINT) || { 
               id: 'default-home', 
-              type: RoutePointType.HOME_POINT,
               locality: 'Unknown', 
               postalCode: '', 
               country: '', 
