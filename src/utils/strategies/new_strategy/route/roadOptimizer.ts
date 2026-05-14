@@ -11,6 +11,17 @@
 import type { FreightOffer, OptimizedRoute, RouteSegment, RoutePoint } from '../../../../types';
 import { searchTranseuLocation } from '../../../services/ApiTransService.compatibility';
 import type { LocationSearchParams } from '../../../services/ApiTransService.compatibility';
+import {
+  DISTANCE_CONFIG,
+  SEARCH_LIMITS,
+  OPTIMIZATION_PARAMS,
+  SCORING_WEIGHTS,
+  DRIVING_PARAMS,
+  DEFAULT_CONFIG,
+  GEOCODING_CONFIG,
+  calculateMaxCandidatesForLevel,
+  validateOptimizationConfig
+} from './roadOptimizerConfig';
 
 interface OptimizationConfig {
   homeBase: RoutePoint;
@@ -56,14 +67,13 @@ interface RouteSearchState {
  * Розрахунок відстані між двома точками (формула Haversine)
  */
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const dLat = (lat2 - lat1) * DISTANCE_CONFIG.DEG_TO_RAD;
+  const dLon = (lon2 - lon1) * DISTANCE_CONFIG.DEG_TO_RAD;
   const a = 
     Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    Math.cos(lat1 * DISTANCE_CONFIG.DEG_TO_RAD) * Math.cos(lat2 * DISTANCE_CONFIG.DEG_TO_RAD) * Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+  return DISTANCE_CONFIG.EARTH_RADIUS_KM * c;
 }
 
 /**
@@ -102,8 +112,8 @@ async function geocodeLocation(locality: string, country: string, postalCode?: s
   try {
     const params: LocationSearchParams = {
       search: searchQuery,
-      lang: 'en',
-      limit: 1
+      lang: GEOCODING_CONFIG.DEFAULT_LANGUAGE,
+      limit: GEOCODING_CONFIG.LOCATION_SEARCH_LIMIT
     };
 
     const response = await searchTranseuLocation(params);
@@ -134,7 +144,7 @@ async function preGeocodeOffers(offers: FreightOffer[]): Promise<GeocodedOffer[]
   const startTime = Date.now();
   
   const geocodedOffers: GeocodedOffer[] = [];
-  const batchSize = 10;
+  const batchSize = OPTIMIZATION_PARAMS.GEOCODING_BATCH_SIZE;
   
   for (let i = 0; i < offers.length; i += batchSize) {
     const batch = offers.slice(i, i + batchSize);
@@ -327,7 +337,7 @@ async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
   // 1. Перевіряємо чи можна завершити маршрут
   const returnDistance = calculateDistanceFast(lastOffer._geocoded.unloading, homeBaseCoords);
   
-  if (returnDistance <= 300) {
+  if (returnDistance <= SEARCH_LIMITS.MAX_RETURN_HOME_DISTANCE_KM) {
     try {
       const route = await buildRouteFromGeocoded([...currentRoute], config);
       foundRoutes.push(route);
@@ -348,7 +358,7 @@ async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
       offer._geocoded.loading
     );
     
-    const maxEmptyDistance = config.maxEmptyDistanceKm || 200;
+    const maxEmptyDistance = config.maxEmptyDistanceKm || SEARCH_LIMITS.DEFAULT_MAX_EMPTY_DISTANCE_KM;
     if (emptyDistance > maxEmptyDistance) continue;
     
     if (!isTimeValid(lastOffer, offer)) continue;
@@ -358,7 +368,7 @@ async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
 
   // Сортуємо та обмежуємо кандидатів
   nextOfferCandidates.sort((a, b) => a.distance - b.distance);
-  const maxCandidates = Math.max(10, Math.floor(50 / (currentRoute.length + 1)));
+  const maxCandidates = calculateMaxCandidatesForLevel(currentRoute.length);
   const limitedCandidates = nextOfferCandidates.slice(0, maxCandidates);
 
   // 3. Рекурсивно досліджуємо кандидатів
@@ -443,7 +453,9 @@ async function buildRouteFromGeocoded(offers: GeocodedOffer[], config: Optimizat
   }
 
   const emptyRunPercent = totalDistance > 0 ? (totalEmptyDistance / totalDistance) * 100 : 0;
-  const score = loadedDistance * 10 - totalEmptyDistance * 3 + totalEarnings * 0.1;
+  const score = loadedDistance * SCORING_WEIGHTS.LOADED_DISTANCE_WEIGHT - 
+                totalEmptyDistance * SCORING_WEIGHTS.EMPTY_DISTANCE_PENALTY + 
+                totalEarnings * SCORING_WEIGHTS.EARNINGS_WEIGHT;
 
   return {
     offers,
@@ -462,8 +474,8 @@ async function buildRouteFromGeocoded(offers: GeocodedOffer[], config: Optimizat
 async function findBestStartingOffers(
   offers: GeocodedOffer[], 
   homeBase: RoutePoint, 
-  maxDistance: number = 300,
-  maxCount: number = 20
+  maxDistance: number = SEARCH_LIMITS.MAX_HOME_TO_START_DISTANCE_KM,
+  maxCount: number = SEARCH_LIMITS.MAX_STARTING_OFFERS
 ): Promise<Array<{ offer: GeocodedOffer; distance: number; score: number }>> {
   const candidates: Array<{ offer: GeocodedOffer; distance: number; score: number }> = [];
   const homeBaseCoords = { lat: homeBase.latitude, lon: homeBase.longitude };
@@ -473,9 +485,11 @@ async function findBestStartingOffers(
     
     if (distance <= maxDistance) {
       const earnings = offer.price.value || 0;
-      const loadedDistance = offer.freight.route.distance ? offer.freight.route.distance / 1000 : 100;
+      const loadedDistance = offer.freight.route.distance ? offer.freight.route.distance / 1000 : DEFAULT_CONFIG.MIN_LOADED_DISTANCE_KM;
       const pricePerKm = earnings / loadedDistance;
-      const score = earnings * 0.1 - distance * 0.5 + pricePerKm * 10;
+      const score = earnings * SCORING_WEIGHTS.EARNINGS_WEIGHT - 
+                   distance * SCORING_WEIGHTS.HOME_DISTANCE_PENALTY + 
+                   pricePerKm * SCORING_WEIGHTS.PRICE_PER_KM_WEIGHT;
       
       candidates.push({ offer, distance, score });
     }
@@ -510,7 +524,7 @@ async function convertToOptimizedRoute(candidate: RouteCandidate, config: Optimi
     }
 
     const drivingHours = offerDistance / config.averageSpeedKmh;
-    const restStops = Math.floor(drivingHours / 4.5);
+    const restStops = Math.floor(drivingHours / DRIVING_PARAMS.MAX_CONTINUOUS_DRIVING_HOURS);
     
     const segment: RouteSegment = {
       offer,
@@ -530,14 +544,14 @@ async function convertToOptimizedRoute(candidate: RouteCandidate, config: Optimi
   }
 
   const totalDrivingHours = segments.reduce((sum, seg) => sum + seg.drivingHours, 0);
-  const totalDays = Math.max(1, totalDrivingHours / 8);
+  const totalDays = Math.max(1, totalDrivingHours / DRIVING_PARAMS.AVERAGE_WORK_HOURS_PER_DAY);
   const mandatoryBreaks = segments.reduce((sum, seg) => sum + seg.restStops, 0);
-  const totalRestHours = mandatoryBreaks * 0.75;
-  const idleHours = Math.max(0, totalDays * 24 - totalDrivingHours - totalRestHours - (totalDays * 11));
-  const weeklyRestsNeeded = Math.floor(totalDays / 7);
+  const totalRestHours = mandatoryBreaks * DRIVING_PARAMS.MANDATORY_BREAK_HOURS;
+  const idleHours = Math.max(0, totalDays * 24 - totalDrivingHours - totalRestHours - (totalDays * DRIVING_PARAMS.MIN_DAILY_REST_HOURS));
+  const weeklyRestsNeeded = Math.floor(totalDays / DRIVING_PARAMS.DAYS_BEFORE_WEEKLY_REST);
 
   const avgDailyDriving = totalDrivingHours / totalDays;
-  const euCompliant = avgDailyDriving <= 9 && candidate.emptyRunPercent <= config.maxEmptyRunPercent;
+  const euCompliant = avgDailyDriving <= DRIVING_PARAMS.MAX_DAILY_DRIVING_HOURS_EU && candidate.emptyRunPercent <= config.maxEmptyRunPercent;
 
   return {
     segments,
@@ -579,7 +593,12 @@ export async function optimizeRoutes(
     }
 
     // 2. Знаходимо стартові офери
-    const startingOffers = await findBestStartingOffers(geocodedOffers, config.homeBase, 300, 15);
+    const startingOffers = await findBestStartingOffers(
+      geocodedOffers, 
+      config.homeBase, 
+      SEARCH_LIMITS.MAX_HOME_TO_START_DISTANCE_KM, 
+      15
+    );
     
     if (startingOffers.length === 0) {
       throw new Error('Не знайдено стартових оферів поблизу домашньої бази');
@@ -614,7 +633,7 @@ export async function optimizeRoutes(
 
     const sortedRoutes = validRoutes
       .sort((a, b) => b.score - a.score)
-      .slice(0, config.maxResults || 50);
+      .slice(0, config.maxResults || OPTIMIZATION_PARAMS.DEFAULT_MAX_RESULTS);
 
     // 5. Конвертація в OptimizedRoute
     const optimizedRoutes: OptimizedRoute[] = [];
@@ -644,23 +663,34 @@ export async function optimizeRoutes(
 export async function createOptimizedRoutes(
   offers: FreightOffer[],
   homeBase: RoutePoint,
-  maxEmptyRunPercent: number = 10,
-  pricePerKm: number = 1.5,
-  averageSpeedKmh: number = 80,
+  maxEmptyRunPercent: number = DEFAULT_CONFIG.MAX_EMPTY_RUN_PERCENT,
+  pricePerKm: number = DEFAULT_CONFIG.PRICE_PER_KM,
+  averageSpeedKmh: number = DEFAULT_CONFIG.AVERAGE_SPEED_KMH,
   maxResults?: number,
   maxRouteDepth?: number,
   maxEmptyDistanceKm?: number,
   maxSearchTimeMs?: number
 ): Promise<OptimizedRoute[]> {
+  // Валідація параметрів
+  validateOptimizationConfig({
+    maxEmptyRunPercent,
+    pricePerKm,
+    averageSpeedKmh,
+    maxResults,
+    maxRouteDepth,
+    maxEmptyDistanceKm,
+    maxSearchTimeMs
+  });
+
   const config: OptimizationConfig = {
     homeBase,
     maxEmptyRunPercent,
     pricePerKm,
     averageSpeedKmh,
-    maxResults: maxResults || 50,
-    maxRouteDepth: maxRouteDepth || 10,
-    maxEmptyDistanceKm: maxEmptyDistanceKm || 200,
-    maxSearchTimeMs: maxSearchTimeMs || 30000
+    maxResults: maxResults || OPTIMIZATION_PARAMS.DEFAULT_MAX_RESULTS,
+    maxRouteDepth: maxRouteDepth || OPTIMIZATION_PARAMS.DEFAULT_MAX_ROUTE_DEPTH,
+    maxEmptyDistanceKm: maxEmptyDistanceKm || SEARCH_LIMITS.DEFAULT_MAX_EMPTY_DISTANCE_KM,
+    maxSearchTimeMs: maxSearchTimeMs || OPTIMIZATION_PARAMS.DEFAULT_MAX_SEARCH_TIME_MS
   };
 
   return await optimizeRoutes(offers, config);
