@@ -463,7 +463,12 @@ export function useRouteManagement({ config }: UseRouteManagementProps) {
           config.maxEmptyRunPercent || 10,
           config.pricePerKm || 1.5,
           config.averageSpeedKmh || 80,
-          config.maxResults || 50
+          config.maxResults || 50,
+          undefined, // maxRouteDepth
+          undefined, // maxEmptyDistanceKm
+          undefined, // maxSearchTimeMs
+          config.departureDate,
+          config.returnDate
         );
         
         console.log(`✅ Створено ${optimizedRoutes.length} оптимізованих маршрутів`);

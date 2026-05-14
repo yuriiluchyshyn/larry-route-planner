@@ -32,6 +32,8 @@ interface OptimizationConfig {
   maxRouteDepth?: number;
   maxEmptyDistanceKm?: number;
   maxSearchTimeMs?: number;
+  departureDate?: string;
+  returnDate?: string;
 }
 
 interface RouteCandidate {
@@ -315,6 +317,46 @@ function isTimeValid(currentOffer: FreightOffer, nextOffer: FreightOffer): boole
 }
 
 /**
+ * Перевірка валідності всього маршруту відносно departure та return дат
+ */
+function isRouteWithinDateRange(offers: GeocodedOffer[], departureDate?: string, returnDate?: string): boolean {
+  if (!departureDate && !returnDate) return true;
+  if (offers.length === 0) return true;
+  
+  // Перевіряємо перше завантаження
+  const firstOffer = offers[0];
+  const firstLoadingDateStr = getLoadingDate(firstOffer);
+  
+  if (departureDate && firstLoadingDateStr) {
+    const firstLoadingDate = new Date(firstLoadingDateStr);
+    const departure = new Date(departureDate);
+    const loadingDay = new Date(firstLoadingDate.getFullYear(), firstLoadingDate.getMonth(), firstLoadingDate.getDate());
+    const departureDay = new Date(departure.getFullYear(), departure.getMonth(), departure.getDate());
+    
+    if (loadingDay < departureDay) {
+      return false;
+    }
+  }
+  
+  // Перевіряємо останнє розвантаження
+  const lastOffer = offers[offers.length - 1];
+  const lastUnloadingDateStr = getUnloadingDate(lastOffer);
+  
+  if (returnDate && lastUnloadingDateStr) {
+    const lastUnloadingDate = new Date(lastUnloadingDateStr);
+    const returnDay = new Date(returnDate);
+    const unloadingDay = new Date(lastUnloadingDate.getFullYear(), lastUnloadingDate.getMonth(), lastUnloadingDate.getDate());
+    const returnDayNormalized = new Date(returnDay.getFullYear(), returnDay.getMonth(), returnDay.getDate());
+    
+    if (unloadingDay > returnDayNormalized) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
  * ОПТИМІЗОВАНА рекурсивна функція - БЕЗ await в циклі!
  */
 async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
@@ -338,11 +380,14 @@ async function findRoutesRecursively(state: RouteSearchState): Promise<void> {
   const returnDistance = calculateDistanceFast(lastOffer._geocoded.unloading, homeBaseCoords);
   
   if (returnDistance <= SEARCH_LIMITS.MAX_RETURN_HOME_DISTANCE_KM) {
-    try {
-      const route = await buildRouteFromGeocoded([...currentRoute], config);
-      foundRoutes.push(route);
-    } catch (error) {
-      console.warn(`⚠️ Помилка побудови маршруту:`, error);
+    // Перевіряємо валідність дат перед додаванням маршруту
+    if (isRouteWithinDateRange([...currentRoute], config.departureDate, config.returnDate)) {
+      try {
+        const route = await buildRouteFromGeocoded([...currentRoute], config);
+        foundRoutes.push(route);
+      } catch (error) {
+        console.warn(`⚠️ Помилка побудови маршруту:`, error);
+      }
     }
   }
 
@@ -475,24 +520,38 @@ async function findBestStartingOffers(
   offers: GeocodedOffer[], 
   homeBase: RoutePoint, 
   maxDistance: number = SEARCH_LIMITS.MAX_HOME_TO_START_DISTANCE_KM,
-  maxCount: number = SEARCH_LIMITS.MAX_STARTING_OFFERS
+  maxCount: number = SEARCH_LIMITS.MAX_STARTING_OFFERS,
+  departureDate?: string,
+  returnDate?: string
 ): Promise<Array<{ offer: GeocodedOffer; distance: number; score: number }>> {
   const candidates: Array<{ offer: GeocodedOffer; distance: number; score: number }> = [];
   const homeBaseCoords = { lat: homeBase.latitude, lon: homeBase.longitude };
   
+  let validDateCount = 0;
+  let totalChecked = 0;
+  
   for (const offer of offers) {
     const distance = calculateDistanceFast(homeBaseCoords, offer._geocoded.loading);
+    totalChecked++;
     
     if (distance <= maxDistance) {
-      const earnings = offer.price.value || 0;
-      const loadedDistance = offer.freight.route.distance ? offer.freight.route.distance / 1000 : DEFAULT_CONFIG.MIN_LOADED_DISTANCE_KM;
-      const pricePerKm = earnings / loadedDistance;
-      const score = earnings * SCORING_WEIGHTS.EARNINGS_WEIGHT - 
-                   distance * SCORING_WEIGHTS.HOME_DISTANCE_PENALTY + 
-                   pricePerKm * SCORING_WEIGHTS.PRICE_PER_KM_WEIGHT;
-      
-      candidates.push({ offer, distance, score });
+      // Перевіряємо валідність дат для стартового офера
+      if (isRouteWithinDateRange([offer], departureDate, returnDate)) {
+        validDateCount++;
+        const earnings = offer.price.value || 0;
+        const loadedDistance = offer.freight.route.distance ? offer.freight.route.distance / 1000 : DEFAULT_CONFIG.MIN_LOADED_DISTANCE_KM;
+        const pricePerKm = earnings / loadedDistance;
+        const score = earnings * SCORING_WEIGHTS.EARNINGS_WEIGHT - 
+                     distance * SCORING_WEIGHTS.HOME_DISTANCE_PENALTY + 
+                     pricePerKm * SCORING_WEIGHTS.PRICE_PER_KM_WEIGHT;
+        
+        candidates.push({ offer, distance, score });
+      }
     }
+  }
+  
+  if (departureDate || returnDate) {
+    console.log(`📅 Стартові офери: ${validDateCount}/${totalChecked} пройшли валідацію дат`);
   }
   
   return candidates.sort((a, b) => b.score - a.score).slice(0, maxCount);
@@ -579,6 +638,10 @@ export async function optimizeRoutes(
 ): Promise<OptimizedRoute[]> {
   console.log(`🚀 Оптимізована оптимізація: ${offers.length} оферів`);
   
+  if (config.departureDate || config.returnDate) {
+    console.log(`📅 Валідація дат: departure=${config.departureDate}, return=${config.returnDate}`);
+  }
+  
   if (offers.length === 0) return [];
 
   const startTime = Date.now();
@@ -597,14 +660,16 @@ export async function optimizeRoutes(
       geocodedOffers, 
       config.homeBase, 
       SEARCH_LIMITS.MAX_HOME_TO_START_DISTANCE_KM, 
-      15
+      15,
+      config.departureDate,
+      config.returnDate
     );
     
     if (startingOffers.length === 0) {
       throw new Error('Не знайдено стартових оферів поблизу домашньої бази');
     }
 
-    // 3. Рекурсивний пошук для кожного стартового офера
+    // 4. Рекурсивний пошук для кожного стартового офера
     for (const startingOffer of startingOffers) {
       if (config.maxSearchTimeMs && (Date.now() - startTime) > config.maxSearchTimeMs) {
         break;
@@ -626,7 +691,7 @@ export async function optimizeRoutes(
       }
     }
 
-    // 4. Фільтрація та сортування
+    // 5. Фільтрація та сортування
     const validRoutes = foundRoutes.filter(route => 
       route.emptyRunPercent <= config.maxEmptyRunPercent
     );
@@ -635,7 +700,7 @@ export async function optimizeRoutes(
       .sort((a, b) => b.score - a.score)
       .slice(0, config.maxResults || OPTIMIZATION_PARAMS.DEFAULT_MAX_RESULTS);
 
-    // 5. Конвертація в OptimizedRoute
+    // 6. Конвертація в OptimizedRoute
     const optimizedRoutes: OptimizedRoute[] = [];
     for (const candidate of sortedRoutes) {
       try {
@@ -669,7 +734,9 @@ export async function createOptimizedRoutes(
   maxResults?: number,
   maxRouteDepth?: number,
   maxEmptyDistanceKm?: number,
-  maxSearchTimeMs?: number
+  maxSearchTimeMs?: number,
+  departureDate?: string,
+  returnDate?: string
 ): Promise<OptimizedRoute[]> {
   // Валідація параметрів
   validateOptimizationConfig({
@@ -690,7 +757,9 @@ export async function createOptimizedRoutes(
     maxResults: maxResults || OPTIMIZATION_PARAMS.DEFAULT_MAX_RESULTS,
     maxRouteDepth: maxRouteDepth || OPTIMIZATION_PARAMS.DEFAULT_MAX_ROUTE_DEPTH,
     maxEmptyDistanceKm: maxEmptyDistanceKm || SEARCH_LIMITS.DEFAULT_MAX_EMPTY_DISTANCE_KM,
-    maxSearchTimeMs: maxSearchTimeMs || OPTIMIZATION_PARAMS.DEFAULT_MAX_SEARCH_TIME_MS
+    maxSearchTimeMs: maxSearchTimeMs || OPTIMIZATION_PARAMS.DEFAULT_MAX_SEARCH_TIME_MS,
+    departureDate,
+    returnDate
   };
 
   return await optimizeRoutes(offers, config);

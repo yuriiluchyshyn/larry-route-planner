@@ -15,6 +15,7 @@ export const API_CONFIG = {
     GEOCODER_LOCATIONS: '/app/geocoder-api/api/v2/locations',
     GEOCODER_REVERSE: '/app/geocoder-api/api/v2/reverse',
     GEOCODER_SUGGEST: '/app/geocoder-api/api/v2/suggest',
+    ROUTE_CALCULATE: '/app/stored-routes/api/rest/v3/stored-routes/{routeId}/private/calculate',
     HEALTH: '/health',
     STATUS: '/status'
   },

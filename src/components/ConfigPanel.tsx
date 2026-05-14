@@ -245,7 +245,10 @@ export function ConfigPanel({
   useEffect(() => {
     const savedConfig = loadConfig();
     if (savedConfig) {
+      console.log('🔄 Loading saved config from localStorage:', savedConfig);
       onChange({ ...config, ...savedConfig });
+    } else {
+      console.log('ℹ️ No saved config found in localStorage');
     }
   }, []);
 
@@ -255,23 +258,36 @@ export function ConfigPanel({
       // Перевіряємо чи вже є домашня база
       const hasHomeBase = config?.routes?.some(r => r.type === 'homePoint');
       
+      console.log('🏠 Home base check:', {
+        hasHomeBase,
+        routesCount: config?.routes?.length || 0,
+        routes: config?.routes?.map(r => ({ type: r.type, locality: r.locality })) || []
+      });
+      
       if (!hasHomeBase && isGeolocationAvailable()) {
         try {
           console.log('🏠 No home base found, auto-detecting location...');
           const location = await getCurrentLocation();
+          console.log('📍 Got current location:', location);
           
           const geo = await reverseGeocode(location.latitude, location.longitude);
+          console.log('🌍 Reverse geocoded:', geo);
           
           const newHomePoint = {
+            id: `home-${Date.now()}`, // Додаємо унікальний ID
             type: 'homePoint' as const,
             latitude: location.latitude,
             longitude: location.longitude,
             locality: geo.locality || 'Current Location',
             postalCode: geo.postalCode || '',
             country: geo.country || 'Unknown',
+            range: 0, // Домашня база не має радіусу пошуку
           };
           
           const updatedRoutes = [...(config?.routes || []), newHomePoint];
+          console.log('✅ Creating home base:', newHomePoint);
+          console.log('📋 Updated routes:', updatedRoutes);
+          
           onChange({ ...config, routes: updatedRoutes });
           
           console.log('✅ Auto-detected home base:', newHomePoint);
@@ -279,6 +295,10 @@ export function ConfigPanel({
           console.log('ℹ️ Could not auto-detect location:', error);
           // Не показуємо помилку користувачу - це автоматична функція
         }
+      } else if (hasHomeBase) {
+        console.log('✅ Home base already exists, skipping auto-detection');
+      } else if (!isGeolocationAvailable()) {
+        console.log('❌ Geolocation not available');
       }
     };
 
@@ -289,7 +309,10 @@ export function ConfigPanel({
 
   // Save config whenever it changes
   useEffect(() => {
-    saveConfig(config);
+    if (config) {
+      console.log('💾 Saving config to localStorage:', config);
+      saveConfig(config);
+    }
   }, [config]);
 
   const toggleSection = (section: keyof typeof collapsed) => {
@@ -334,12 +357,14 @@ export function ConfigPanel({
       } else {
         // Create new home point if it doesn't exist
         const newHomePoint = {
+          id: `home-${Date.now()}`,
           type: 'homePoint' as const,
           latitude: lat,
           longitude: lon,
           locality: geo.locality || 'Unknown',
           postalCode: geo.postalCode || '',
           country: geo.country || 'Unknown',
+          range: 0,
         };
         
         const updatedRoutes = [...(config.routes || []), newHomePoint];
@@ -349,29 +374,6 @@ export function ConfigPanel({
     }
 
     setMapModal(null);
-  };
-
-  const handleUseCurrentLocation = async () => {
-    if (!isGeolocationAvailable()) {
-      alert('Geolocation is not supported by your browser');
-      return;
-    }
-
-    try {
-      console.log('📍 Getting current location...');
-      const location = await getCurrentLocation();
-      console.log('📍 Current location:', location);
-      
-      // Використовуємо ту ж логіку що і в handleMapSelect
-      await handleMapSelect(location.latitude, location.longitude);
-      
-      // Показуємо повідомлення про успіх
-      alert(`✅ Home base set to your current location!\nAccuracy: ${location.accuracy ? Math.round(location.accuracy) + 'm' : 'unknown'}`);
-      
-    } catch (error) {
-      console.error('❌ Error getting location:', error);
-      alert(`❌ Could not get your location: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
   };
 
   return (
@@ -618,16 +620,11 @@ export function ConfigPanel({
         <div className="help-text">
           <strong>Home Base:</strong> The starting and ending point of all routes. 
           Larry will depart from here and must return here within the time window.
-        </div>
-        <div className="field checkbox-field">
-          <label>
-            <input
-              type="checkbox"
-              checked={false}
-              disabled={true}
-            />
-            Use first loading point as home base (Extension mode - managed automatically)
-          </label>
+          {!config.routes?.find(r => r.type === 'homePoint') && (
+            <div style={{ marginTop: '8px', padding: '8px', background: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
+              ⚠️ Home base not set. It will be auto-detected using your current location when available.
+            </div>
+          )}
         </div>
         <div className="field-row">
           <div className="field">
@@ -693,28 +690,36 @@ export function ConfigPanel({
         <div className="field">
           <button
             className="pick-map-btn"
-            onClick={() => {
+            onClick={async () => {
               const homePoint = config.routes?.find(r => r.type === 'homePoint');
+              
+              // Спробуємо отримати поточну локацію для центрування карти
+              let initialLat = homePoint?.latitude || 50.4501; // Київ за замовчуванням
+              let initialLon = homePoint?.longitude || 30.5234;
+              
+              if (isGeolocationAvailable()) {
+                try {
+                  console.log('📍 Getting current location for map centering...');
+                  const location = await getCurrentLocation();
+                  initialLat = location.latitude;
+                  initialLon = location.longitude;
+                  console.log('✅ Will center map on current location:', { initialLat, initialLon });
+                } catch (error) {
+                  console.log('ℹ️ Could not get current location, using default/existing:', error);
+                }
+              }
+              
               setMapModal({
                 type: 'home',
                 index: null,
-                initialLat: homePoint?.latitude || 0,
-                initialLon: homePoint?.longitude || 0,
+                initialLat,
+                initialLon,
               });
             }}
             title="Pick home base on map"
-            style={{ width: '100%', padding: '8px', marginBottom: '8px' }}
+            style={{ width: '100%', padding: '8px' }}
           >
             🗺️ Pick Home Base on Map
-          </button>
-          
-          <button
-            className="pick-map-btn"
-            onClick={handleUseCurrentLocation}
-            title="Use your current location as home base"
-            style={{ width: '100%', padding: '8px', background: '#2c5aa0' }}
-          >
-            📍 Use My Current Location
           </button>
         </div>
         </div>

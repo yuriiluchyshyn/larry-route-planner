@@ -42,7 +42,7 @@ export const OPTIMIZATION_PARAMS = {
   /** Максимальна глибина маршруту за замовчуванням */
   DEFAULT_MAX_ROUTE_DEPTH: 10,
   /** Максимальна кількість результатів за замовчуванням */
-  DEFAULT_MAX_RESULTS: 50,
+  DEFAULT_MAX_RESULTS: 500,
 } as const;
 
 /**
